@@ -1,0 +1,35 @@
+# Anthropic/Claude Code
+api.anthropic.com
+sentry.io
+statsig.anthropic.com
+statsig.com
+
+# VS Code marketplace and updates
+# marketplace.visualstudio.com
+# vscode.blob.core.windows.net
+# update.code.visualstudio.com
+
+# Node.js/npm
+registry.npmjs.org
+
+# Python packages
+pypi.org
+files.pythonhosted.org
+
+# Go packages
+proxy.golang.org
+sum.golang.org
+
+# Rust packages
+crates.io
+static.crates.io
+index.crates.io
+
+# Ubuntu/Debian packages
+archive.ubuntu.com
+security.ubuntu.com
+ports.ubuntu.com
+
+# Ubuntu PPAs (deadsnakes, golang-backports, etc.)
+ppa.launchpadcontent.net
+launchpad.net
