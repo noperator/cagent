@@ -5,24 +5,22 @@ Agent in a box. Locks down the network and filesystem so an agent is free to exp
 ### Install
 
 ```
-git clone https://github.com/noperator/agent-box
+git clone https://github.com/noperator/agent-box && cd agent-box
+docker build -t agent-box .
 ```
 
 ### Configure
 
+Enter the agent's intended workspace on the host, and save a list of patterns that should be excluded from the agent's mounted filesystem.
+
 ```
-docker build -t agent-box .
+echo '*.bak' > .agentignore
 ```
 
 ### Usage
 
 ```
-docker run -it --rm \
-    --cap-add=NET_ADMIN \
-    --cap-add=NET_RAW \
-    -v "$(pwd):/workspace" \
-    -v agent-home:/home/agent \
-    agent-box
+<AGENT-BOX-DIR>/run.sh
 ```
 
 ### Troubleshooting
@@ -40,5 +38,7 @@ This project is an experimental work in progress. There are likely more opportun
 ### To-do
 
 - [ ] specify domains at runtime
-- [ ] git-aware read-only mounts
+- [x] git-aware read-only mounts
 - [ ] refresh firewall after init
+- [ ] quiet down logging a bit
+- [ ] make ignore/readonly configurable
