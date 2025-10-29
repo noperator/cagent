@@ -19,6 +19,7 @@ files.pythonhosted.org
 # Go packages
 proxy.golang.org
 sum.golang.org
+storage.googleapis.com
 
 # Rust packages
 crates.io
