@@ -63,8 +63,10 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Create non-root user
 ARG USERNAME=agent
-RUN useradd -m -s /bin/bash -G sudo ${USERNAME} && \
+RUN useradd -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME}:${USERNAME}" | chpasswd
+# RUN useradd -m -s /bin/bash -G sudo ${USERNAME} && \
+#     echo "${USERNAME}:${USERNAME}" | chpasswd
 
 # Set up passwordless sudo for apt-get and firewall script only
 RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/${USERNAME}-firewall && \
