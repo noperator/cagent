@@ -1,12 +1,12 @@
-Agent in a box. Locks down the network and filesystem so an agent is free to explore the mounted workspace while reducing the risk of it going off the rails. 
+Agent in a cage. Locks down the network and filesystem so an agent is free to explore the mounted workspace while reducing the risk of it going off the rails. 
 
 ## Getting started
 
 ### Install
 
 ```
-git clone https://github.com/noperator/agent-box && cd agent-box
-docker build -t agent-box .
+git clone https://github.com/noperator/cagent && cd cagent
+docker build -t cagent .
 ```
 
 ### Configure
@@ -20,7 +20,7 @@ echo '*.bak' > .agentignore
 ### Usage
 
 ```
-<AGENT-BOX-DIR>/run.sh
+<CAGENT-DIR>/run.sh
 ```
 
 ### Troubleshooting

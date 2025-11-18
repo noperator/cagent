@@ -62,4 +62,4 @@ docker run -it --rm \
     $([ -f "$AGENTIGNORE_FILE" ] && echo '-v' "$WORKSPACE/$AGENTIGNORE_FILE:/workspace/$AGENTIGNORE_FILE:ro") \
     "${EXCLUDE_VOLUMES[@]}" \
     -v agent-home:/home/agent \
-    agent-box "$@"
+    cagent "$@"
