@@ -1,4 +1,4 @@
-# Anthropic/Claude Code
+# Anthropic
 api.anthropic.com
 sentry.io
 statsig.anthropic.com
@@ -11,6 +11,7 @@ statsig.com
 
 # Node.js/npm
 registry.npmjs.org
+deb.nodesource.com
 
 # Python packages
 pypi.org
@@ -20,6 +21,7 @@ files.pythonhosted.org
 proxy.golang.org
 sum.golang.org
 storage.googleapis.com
+gopkg.in
 
 # Rust packages
 crates.io
@@ -34,3 +36,12 @@ ports.ubuntu.com
 # Ubuntu PPAs (deadsnakes, golang-backports, etc.)
 ppa.launchpadcontent.net
 launchpad.net
+
+# GitHub
+# github.com
+
+# OpenAI
+api.openai.com
+
+# OpenRouter
+openrouter.ai
