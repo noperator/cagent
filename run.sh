@@ -6,6 +6,7 @@ AGENTIGNORE_FILE=".agentignore"
 AGENTREADONLY_FILE=".agentreadonly"
 EXCLUDE_VOLUMES=()
 READONLY_VOLUMES=()
+EXCLUDED_DIRS=() # Track excluded directories
 
 # Create temporary empty file and directory to reuse for exclusions (hidden files)
 EMPTY_FILE="/tmp/.agent-empty-file"
@@ -14,6 +15,17 @@ touch "$EMPTY_FILE"
 chmod 444 "$EMPTY_FILE"
 mkdir -p "$EMPTY_DIR"
 chmod 555 "$EMPTY_DIR"
+
+# Function to check if a path is inside an excluded directory
+is_inside_excluded_dir() {
+    local path="$1"
+    for excl_dir in "${EXCLUDED_DIRS[@]}"; do
+        if [[ "$path" == "$excl_dir"* ]]; then
+            return 0 # true, is inside excluded dir
+        fi
+    done
+    return 1 # false, not inside excluded dir
+}
 
 # Function to process patterns and add to volume array
 process_patterns() {
@@ -56,6 +68,11 @@ process_patterns() {
             # Skip the config files themselves
             [[ "$rel_path" == "$AGENTIGNORE_FILE" || "$rel_path" == "$AGENTREADONLY_FILE" ]] && continue
 
+            # Skip if this path is inside an already-excluded directory
+            if is_inside_excluded_dir "$rel_path"; then
+                continue
+            fi
+
             if [ "$is_readonly" = true ]; then
                 # Mount actual host file/dir as read-only
                 eval "${volume_array_name}+=(\"-v\" \"$WORKSPACE/$rel_path:/workspace/$rel_path:ro\")"
@@ -65,6 +82,8 @@ process_patterns() {
                 if [ -d "$path" ]; then
                     eval "${volume_array_name}+=(\"-v\" \"$EMPTY_DIR:/workspace/$rel_path:ro\")"
                     echo "  $rel_path" >&2
+                    # Track this excluded directory
+                    EXCLUDED_DIRS+=("$rel_path/")
                 elif [ -f "$path" ]; then
                     eval "${volume_array_name}+=(\"-v\" \"$EMPTY_FILE:/workspace/$rel_path:ro\")"
                     echo "  $rel_path" >&2
