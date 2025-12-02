@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     dnsutils \
     aggregate \
+    tcpdump \
     # GitHub CLI
     gh \
     # Shell utilities
@@ -69,12 +70,15 @@ RUN useradd -m -s /bin/bash ${USERNAME} && \
 #     echo "${USERNAME}:${USERNAME}" | chpasswd
 
 # Set up passwordless sudo for apt-get and firewall script only
-RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/${USERNAME}-firewall && \
+RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/firewall.sh" > /etc/sudoers.d/${USERNAME}-firewall && \
     echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt" > /etc/sudoers.d/${USERNAME}-packages && \
     chmod 0440 /etc/sudoers.d/${USERNAME}-*
 
-# Install Claude Code
+# Install coding agents
 RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @openai/codex
+RUN npm install -g opencode-ai@latest
+RUN npm install -g @charmland/crush
 
 # Switch to non-root user
 USER ${USERNAME}
@@ -90,10 +94,10 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 
 # Copy scripts
 USER root
-COPY init-firewall.sh /usr/local/bin/
+COPY firewall.sh /usr/local/bin/
 COPY domains.txt /usr/local/etc/
 COPY entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/firewall.sh /usr/local/bin/entrypoint.sh
 
 # Set workspace
 WORKDIR /workspace
