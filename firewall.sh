@@ -26,7 +26,8 @@ if [ -n "$DOCKER_DNS_RULES" ]; then
     iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
     echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
 else
-    echo "No Docker DNS rules to restore"
+    # echo "No Docker DNS rules to restore"
+    :
 fi
 
 # First allow DNS and localhost before any restrictions
@@ -46,7 +47,7 @@ iptables -A OUTPUT -o lo -j ACCEPT
 ipset create allowed-domains hash:net
 
 # Fetch GitHub meta information and aggregate + add their IP ranges
-echo "Fetching GitHub IP ranges..."
+# echo "Fetching GitHub IP ranges..."
 gh_ranges=$(curl -s https://api.github.com/meta)
 if [ -z "$gh_ranges" ]; then
     echo "ERROR: Failed to fetch GitHub IP ranges"
@@ -58,19 +59,19 @@ if ! echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null; then
     exit 1
 fi
 
-echo "Processing GitHub IPs..."
+# echo "Processing GitHub IPs..."
 while read -r cidr; do
     if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
         echo "ERROR: Invalid CIDR range from GitHub meta: $cidr"
         exit 1
     fi
-    echo "Adding GitHub range $cidr"
+    # echo "Adding GitHub range $cidr"
     ipset add allowed-domains "$cidr"
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
 
 # Resolve and add other allowed domains
 cat "$DOMAINS_FILE" | grep -vE '^#|^ *$' | while read domain; do
-    echo "Resolving $domain..."
+    # echo "Resolving $domain..."
     ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
     if [ -z "$ips" ]; then
         echo "ERROR: Failed to resolve $domain"
@@ -83,10 +84,11 @@ cat "$DOMAINS_FILE" | grep -vE '^#|^ *$' | while read domain; do
             exit 1
         fi
         if ! ipset test allowed-domains "$ip" 2>/dev/null; then
-            echo "Adding $ip for $domain"
+            # echo "Adding $ip for $domain"
             ipset add allowed-domains "$ip"
         else
-            echo "Skipping $ip for $domain (already added)"
+            # echo "Skipping $ip for $domain (already added)"
+            :
         fi
     done < <(echo "$ips")
 
@@ -95,12 +97,12 @@ done
 # Get host IP from default route
 HOST_IP=$(ip route | grep default | cut -d" " -f3)
 if [ -z "$HOST_IP" ]; then
-    echo "ERROR: Failed to detect host IP"
+    # echo "ERROR: Failed to detect host IP"
     exit 1
 fi
 
 HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
-echo "Host network detected as: $HOST_NETWORK"
+# echo "Host network detected as: $HOST_NETWORK"
 
 # Set up remaining iptables rules
 iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
