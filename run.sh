@@ -118,10 +118,23 @@ fi
 CAGENT_HOME="${HOME}/.cagent-home"
 mkdir -p "$CAGENT_HOME"
 
+# Check for KVM support and set up device + resource limits
+KVM_DEVICE=""
+RESOURCE_LIMITS=""
+if [ -e /dev/kvm ]; then
+    echo "KVM detected - enabling VM support with resource limits" >&2
+    KVM_DEVICE="--device /dev/kvm"
+    RESOURCE_LIMITS="--cpus=4 --memory=8g --pids-limit=200"
+else
+    echo "KVM not available - QEMU will run in emulation mode (slow)" >&2
+fi
+
 # Build docker run command
 docker run -it --rm \
     --cap-add=NET_ADMIN \
     --cap-add=NET_RAW \
+    ${KVM_DEVICE} \
+    ${RESOURCE_LIMITS} \
     -v "$WORKSPACE:/workspace" \
     $([ -f "$CAGENTIGNORE_FILE" ] && echo '-v' "$WORKSPACE/$CAGENTIGNORE_FILE:/workspace/$CAGENTIGNORE_FILE:ro") \
     $([ -f "$CAGENTREADONLY_FILE" ] && echo '-v' "$WORKSPACE/$CAGENTREADONLY_FILE:/workspace/$CAGENTREADONLY_FILE:ro") \

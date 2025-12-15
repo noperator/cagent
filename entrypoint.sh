@@ -20,6 +20,14 @@ WORKSPACE_GID=$(stat -c '%g' /workspace)
 usermod -u "$WORKSPACE_UID" cagent 2>/dev/null || true
 groupmod -g "$WORKSPACE_GID" cagent 2>/dev/null || true
 
+# Configure AFL++ (needs privileged container)
+if [ -w /proc/sys/kernel/core_pattern ]; then
+    echo core >/proc/sys/kernel/core_pattern
+fi
+if [ -w /proc/sys/kernel/sched_child_runs_first ]; then
+    echo 1 >/proc/sys/kernel/sched_child_runs_first
+fi
+
 # Run firewall setup
 echo "Setting up firewall..."
 /usr/local/bin/firewall.sh /usr/local/etc/domains.txt
