@@ -16,9 +16,9 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
 WORKSPACE_UID=$(stat -c '%u' /workspace)
 WORKSPACE_GID=$(stat -c '%g' /workspace)
 
-# Update agent user to match workspace ownership
-usermod -u "$WORKSPACE_UID" agent 2>/dev/null || true
-groupmod -g "$WORKSPACE_GID" agent 2>/dev/null || true
+# Update cagent user to match workspace ownership
+usermod -u "$WORKSPACE_UID" cagent 2>/dev/null || true
+groupmod -g "$WORKSPACE_GID" cagent 2>/dev/null || true
 
 # Run firewall setup
 echo "Setting up firewall..."
@@ -27,5 +27,5 @@ echo "Setting up firewall..."
 # Switch to workspace directory
 cd /workspace
 
-# Drop to agent user and execute command
-exec gosu agent "${@:-bash}"
+# Drop to cagent user and execute command
+exec gosu cagent "${@:-bash}"

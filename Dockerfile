@@ -1,10 +1,16 @@
+# syntax=docker/dockerfile:1
+
 FROM ubuntu:22.04
+
+ENV MYTEST=mytest
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system tools and firewall requirements
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     # Basic development tools
     git \
     curl \
@@ -40,13 +46,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Node
 ARG NODE_VERSION=20
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python
 ARG PYTHON_VERSION=3.13
-RUN add-apt-repository ppa:deadsnakes/ppa && \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && apt-get install -y \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-venv \
@@ -63,7 +73,7 @@ RUN wget "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" && \
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Create non-root user
-ARG USERNAME=agent
+ARG USERNAME=cagent
 RUN useradd -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME}:${USERNAME}" | chpasswd
 # RUN useradd -m -s /bin/bash -G sudo ${USERNAME} && \
@@ -75,17 +85,22 @@ RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/firewall.sh" > /etc/su
     chmod 0440 /etc/sudoers.d/${USERNAME}-*
 
 # Install coding agents
-RUN npm install -g @anthropic-ai/claude-code
-RUN npm install -g @openai/codex
-RUN npm install -g opencode-ai@latest
-RUN npm install -g @charmland/crush
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g \
+    @anthropic-ai/claude-code \
+    @openai/codex \
+    opencode-ai@latest \
+    @charmland/crush
 
 # Switch to non-root user
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
 # Install Rust
+# RUN --mount=type=cache,target=/home/${USERNAME}/.cargo/registry,uid=1000,gid=1000 \
+#     --mount=type=cache,target=/home/${USERNAME}/.cargo/git,uid=1000,gid=1000 \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
 ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
 
 # Set up Go path

@@ -2,15 +2,15 @@
 set -euo pipefail
 
 WORKSPACE="$(pwd)"
-AGENTIGNORE_FILE=".agentignore"
-AGENTREADONLY_FILE=".agentreadonly"
+CAGENTIGNORE_FILE=".cagentignore"
+CAGENTREADONLY_FILE=".cagentreadonly"
 EXCLUDE_VOLUMES=()
 READONLY_VOLUMES=()
 EXCLUDED_DIRS=() # Track excluded directories
 
 # Create temporary empty file and directory to reuse for exclusions (hidden files)
-EMPTY_FILE="/tmp/.agent-empty-file"
-EMPTY_DIR="/tmp/.agent-empty-dir"
+EMPTY_FILE="/tmp/.cagent-empty-file"
+EMPTY_DIR="/tmp/.cagent-empty-dir"
 touch "$EMPTY_FILE"
 chmod 444 "$EMPTY_FILE"
 mkdir -p "$EMPTY_DIR"
@@ -66,7 +66,7 @@ process_patterns() {
             rel_path="${path#./}"
 
             # Skip the config files themselves
-            [[ "$rel_path" == "$AGENTIGNORE_FILE" || "$rel_path" == "$AGENTREADONLY_FILE" ]] && continue
+            [[ "$rel_path" == "$CAGENTIGNORE_FILE" || "$rel_path" == "$CAGENTREADONLY_FILE" ]] && continue
 
             # Skip if this path is inside an already-excluded directory
             if is_inside_excluded_dir "$rel_path"; then
@@ -94,34 +94,38 @@ process_patterns() {
 }
 
 # Process ignore patterns (hidden completely)
-if [ ! -f "$AGENTIGNORE_FILE" ]; then
-    process_patterns "$AGENTIGNORE_FILE" "EXCLUDE_VOLUMES" true false <<'EOF'
+if [ ! -f "$CAGENTIGNORE_FILE" ]; then
+    process_patterns "$CAGENTIGNORE_FILE" "EXCLUDE_VOLUMES" true false <<'EOF'
 *.bak
 *.tmp
 EOF
 else
-    process_patterns "$AGENTIGNORE_FILE" "EXCLUDE_VOLUMES" false false
+    process_patterns "$CAGENTIGNORE_FILE" "EXCLUDE_VOLUMES" false false
 fi
 
 # Process read-only patterns (visible but read-only)
-if [ ! -f "$AGENTREADONLY_FILE" ]; then
-    process_patterns "$AGENTREADONLY_FILE" "READONLY_VOLUMES" true true <<'EOF'
+if [ ! -f "$CAGENTREADONLY_FILE" ]; then
+    process_patterns "$CAGENTREADONLY_FILE" "READONLY_VOLUMES" true true <<'EOF'
 .git
 .env
 notes.txt
 EOF
 else
-    process_patterns "$AGENTREADONLY_FILE" "READONLY_VOLUMES" false true
+    process_patterns "$CAGENTREADONLY_FILE" "READONLY_VOLUMES" false true
 fi
+
+# Create cagent home directory if it doesn't exist
+CAGENT_HOME="${HOME}/.cagent-home"
+mkdir -p "$CAGENT_HOME"
 
 # Build docker run command
 docker run -it --rm \
     --cap-add=NET_ADMIN \
     --cap-add=NET_RAW \
     -v "$WORKSPACE:/workspace" \
-    $([ -f "$AGENTIGNORE_FILE" ] && echo '-v' "$WORKSPACE/$AGENTIGNORE_FILE:/workspace/$AGENTIGNORE_FILE:ro") \
-    $([ -f "$AGENTREADONLY_FILE" ] && echo '-v' "$WORKSPACE/$AGENTREADONLY_FILE:/workspace/$AGENTREADONLY_FILE:ro") \
+    $([ -f "$CAGENTIGNORE_FILE" ] && echo '-v' "$WORKSPACE/$CAGENTIGNORE_FILE:/workspace/$CAGENTIGNORE_FILE:ro") \
+    $([ -f "$CAGENTREADONLY_FILE" ] && echo '-v' "$WORKSPACE/$CAGENTREADONLY_FILE:/workspace/$CAGENTREADONLY_FILE:ro") \
     "${READONLY_VOLUMES[@]}" \
     "${EXCLUDE_VOLUMES[@]}" \
-    -v agent-home:/home/agent \
+    -v "$CAGENT_HOME:/home/cagent" \
     cagent "$@"
