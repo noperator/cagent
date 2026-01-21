@@ -8,6 +8,23 @@ EXCLUDE_VOLUMES=()
 READONLY_VOLUMES=()
 EXCLUDED_DIRS=() # Track excluded directories
 
+# Detect if we should use Sysbox
+RUNTIME_ARGS=()
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Check if sysbox-runc is available
+    if docker info 2>/dev/null | grep -q "sysbox-runc"; then
+        echo "Sysbox runtime detected, enabling Docker-in-Docker support..." >&2
+        RUNTIME_ARGS+=(--runtime=sysbox-runc)
+        RUNTIME_ARGS+=(-v agent-docker:/var/lib/docker)
+        RUNTIME_ARGS+=(-e CAGENT_DIND=1)
+    else
+        echo "Running on Linux without Sysbox (Docker-in-Docker unavailable)" >&2
+        echo "To enable: https://github.com/nestybox/sysbox#installation" >&2
+    fi
+else
+    echo "Running on non-Linux platform (Docker-in-Docker unavailable)" >&2
+fi
+
 # Create temporary empty file and directory to reuse for exclusions (hidden files)
 EMPTY_FILE="/tmp/.agent-empty-file"
 EMPTY_DIR="/tmp/.agent-empty-dir"
@@ -116,6 +133,7 @@ fi
 
 # Build docker run command
 docker run -it --rm \
+    "${RUNTIME_ARGS[@]}" \
     --cap-add=NET_ADMIN \
     --cap-add=NET_RAW \
     -v "$WORKSPACE:/workspace" \

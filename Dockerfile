@@ -38,6 +38,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Docker (for optional Sysbox runtime)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install crun (latest release)
+RUN CRUN_VER=$(curl -s https://api.github.com/repos/containers/crun/releases/latest | grep '"tag_name"' | cut -d'"' -f4) && \
+    curl -L -o /usr/bin/crun "https://github.com/containers/crun/releases/download/${CRUN_VER}/crun-${CRUN_VER}-linux-amd64" && \
+    chmod +x /usr/bin/crun
+
 # Install Node
 ARG NODE_VERSION=20
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
@@ -68,6 +78,9 @@ RUN useradd -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME}:${USERNAME}" | chpasswd
 # RUN useradd -m -s /bin/bash -G sudo ${USERNAME} && \
 #     echo "${USERNAME}:${USERNAME}" | chpasswd
+
+# Add agent to docker group for CLI access
+RUN usermod -aG docker ${USERNAME}
 
 # Set up passwordless sudo for apt-get and firewall script only
 RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/firewall.sh" > /etc/sudoers.d/${USERNAME}-firewall && \
