@@ -1,53 +1,29 @@
 #!/bin/bash
 
-# Yoinked from https://github.com/anthropics/claude-code/blob/52fea66ba5578428835e037bf9a4062fe356dbe2/.devcontainer/init-firewall.sh
-
-set -euo pipefail # Exit on error, undefined vars, and pipeline failures
-IFS=$'\n\t'       # Stricter word splitting
+set -euo pipefail
+IFS=$'\n\t'
 
 DOMAINS_FILE="$1"
 
-# 1. Extract Docker DNS info BEFORE any flushing
-DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
+# Resolve all domains in parallel via DoH (bypasses local DNS interception)
+resolve_all_domains() {
+    local domains_file="$1"
+    grep -vE '^#|^\s*$' "$domains_file" | xargs -P 20 -I {} sh -c '
+        curl -s "https://cloudflare-dns.com/dns-query?name={}&type=A" \
+            -H "accept: application/dns-json" 2>/dev/null | \
+            jq -r ".Answer[]? | select(.type == 1) | .data" 2>/dev/null
+    ' | grep -E '^[1-9][0-9]*\.[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/$/\/32/'
+}
 
-# Flush existing rules and delete existing ipsets
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -t mangle -F
-iptables -t mangle -X
-ipset destroy allowed-domains 2>/dev/null || true
-
-# 2. Selectively restore ONLY internal Docker DNS resolution
-if [ -n "$DOCKER_DNS_RULES" ]; then
-    echo "Restoring Docker DNS rules..."
-    iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
-    iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
-    echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
-else
-    # echo "No Docker DNS rules to restore"
-    :
+# Get host network from default route
+HOST_IP=$(ip route | grep default | cut -d" " -f3)
+if [ -z "$HOST_IP" ]; then
+    echo "ERROR: Failed to detect host IP"
+    exit 1
 fi
+HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
 
-# First allow DNS and localhost before any restrictions
-# Allow outbound DNS
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-# Allow inbound DNS responses
-iptables -A INPUT -p udp --sport 53 -j ACCEPT
-# Allow outbound SSH
-iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
-# Allow inbound SSH responses
-iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
-# Allow localhost
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -o lo -j ACCEPT
-
-# Create ipset with CIDR support
-ipset create allowed-domains hash:net
-
-# Fetch GitHub meta information and aggregate + add their IP ranges
-# echo "Fetching GitHub IP ranges..."
+# Fetch GitHub IP ranges BEFORE any firewall rules
 gh_ranges=$(curl -s https://api.github.com/meta)
 if [ -z "$gh_ranges" ]; then
     echo "ERROR: Failed to fetch GitHub IP ranges"
@@ -59,89 +35,85 @@ if ! echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null; then
     exit 1
 fi
 
-# echo "Processing GitHub IPs..."
-while read -r cidr; do
-    if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-        echo "ERROR: Invalid CIDR range from GitHub meta: $cidr"
-        exit 1
-    fi
-    # echo "Adding GitHub range $cidr"
-    ipset add allowed-domains "$cidr"
-done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
+# Collect all IPs into a temp file
+IP_LIST=$(mktemp)
+trap "rm -f $IP_LIST" EXIT
 
-# Resolve and add other allowed domains
-cat "$DOMAINS_FILE" | grep -vE '^#|^ *$' | while read domain; do
-    # echo "Resolving $domain..."
-    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
-    if [ -z "$ips" ]; then
-        echo "ERROR: Failed to resolve $domain"
-        exit 1
-    fi
+# Add GitHub CIDRs (filter out IPv6 and bogus)
+echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | grep -v ':' | grep -v '^0\.' >>"$IP_LIST"
 
-    while read -r ip; do
-        if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            echo "ERROR: Invalid IP from DNS for $domain: $ip"
-            exit 1
-        fi
-        if ! ipset test allowed-domains "$ip" 2>/dev/null; then
-            # echo "Adding $ip for $domain"
-            ipset add allowed-domains "$ip"
-        else
-            # echo "Skipping $ip for $domain (already added)"
-            :
-        fi
-    done < <(echo "$ips")
+# Resolve all domains in parallel via DoH
+DOMAIN_COUNT=$(grep -cvE '^#|^\s*$' "$DOMAINS_FILE" || echo 0)
+resolve_all_domains "$DOMAINS_FILE" >>"$IP_LIST"
+RESOLVED_IPS=$(grep -c '/32$' "$IP_LIST" || echo 0)
+echo "Resolved $DOMAIN_COUNT domains to $RESOLVED_IPS IPs"
 
-done
+# Use aggregate to merge overlapping ranges and deduplicate
+ALL_IPS=$(aggregate -q <"$IP_LIST" | tr '\n' ',' | sed 's/,$//')
+TOTAL_RANGES=$(echo "$ALL_IPS" | tr ',' '\n' | wc -l)
+echo "Loaded $TOTAL_RANGES total IP ranges (including GitHub)"
 
-# Get host IP from default route
-HOST_IP=$(ip route | grep default | cut -d" " -f3)
-if [ -z "$HOST_IP" ]; then
-    # echo "ERROR: Failed to detect host IP"
+# Create nftables rules file
+NFT_RULES=$(mktemp)
+trap "rm -f $IP_LIST $NFT_RULES" EXIT
+
+cat >"$NFT_RULES" <<EOF
+table ip cagent
+delete table ip cagent
+table ip cagent {
+    set allowed-domains {
+        type ipv4_addr
+        flags interval
+        elements = { $ALL_IPS }
+    }
+
+    chain input {
+        type filter hook input priority 0; policy drop;
+        ct state established,related accept
+        iif lo accept
+        ip saddr $HOST_NETWORK accept
+        udp sport 53 accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority 0; policy drop;
+        ct state established,related accept
+        oif lo accept
+        ip daddr $HOST_NETWORK accept
+        udp dport 53 accept
+        tcp dport 22 accept
+        ip daddr @allowed-domains accept
+        log prefix "[cagent BLOCKED] " limit rate 5/second
+        reject with icmp type admin-prohibited
+    }
+}
+EOF
+
+# Load rules atomically
+if ! nft -f "$NFT_RULES"; then
+    echo "ERROR: Failed to load nftables rules"
     exit 1
 fi
 
-HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
-# echo "Host network detected as: $HOST_NETWORK"
-
-# Set up remaining iptables rules
-iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
-iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
-
-# Set default policies to DROP first
-iptables -P INPUT DROP
-iptables -P FORWARD DROP
-iptables -P OUTPUT DROP
-
-# First allow established connections for already approved traffic
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-# Then allow only specific outbound traffic to allowed domains
-iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
-
-# Explicitly REJECT all other outbound traffic for immediate feedback
-iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+# Cache for watchdog to use
+cp "$NFT_RULES" /var/cache/firewall-rules.nft
 
 echo "Firewall configuration complete"
 
-# Disabling the following verification step for now since the "true positive"
-# `api.github.com` check intermittently fails. That is to say, it successfully
-# blocks `example.com` but sometimes `api.github.com` _also_ appears blocked.
-# Not sure why this is happening and will debug later.
-
-# echo "Verifying firewall rules..."
-# if curl --connect-timeout 5 https://example.com >/dev/null 2>&1; then
-#     echo "ERROR: Firewall verification failed - was able to reach https://example.com"
-#     exit 1
-# else
-#     echo "Firewall verification passed - unable to reach https://example.com as expected"
-# fi
-#
-# # Verify GitHub API access
-# if ! curl --connect-timeout 5 https://api.github.com/zen >/dev/null 2>&1; then
-#     echo "ERROR: Firewall verification failed - unable to reach https://api.github.com"
-#     exit 1
-# else
-#     echo "Firewall verification passed - able to reach https://api.github.com as expected"
-# fi
+# Start watchdog unless --no-watchdog flag passed
+if [[ "${2:-}" != "--no-watchdog" ]]; then
+    (
+        while true; do
+            if ! nft list chain ip cagent output 2>/dev/null | grep -q "@allowed-domains"; then
+                echo "$(date): Tampering detected, restoring..."
+                nft -f /var/cache/firewall-rules.nft
+            fi
+            sleep 0.1
+        done
+    ) &
+    echo "Firewall watchdog started (PID $!)"
+fi

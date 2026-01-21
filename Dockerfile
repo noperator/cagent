@@ -96,8 +96,7 @@ RUN usermod -aG docker ${USERNAME}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Firewall tools
-    iptables \
-    ipset \
+    nftables \
     iproute2 \
     dnsutils \
     aggregate \
