@@ -118,6 +118,9 @@ WORKDIR /workspace
 # Default shell
 ENV SHELL=/bin/bash
 
+# Preserve terminal titles
+ENV CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
+
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]
