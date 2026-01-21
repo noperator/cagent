@@ -18,10 +18,13 @@ pypi.org
 files.pythonhosted.org
 
 # Go packages
-proxy.golang.org
-sum.golang.org
-storage.googleapis.com
+dl.google.com
+go.dev
+golang.org
 gopkg.in
+proxy.golang.org
+storage.googleapis.com
+sum.golang.org
 
 # Rust packages
 crates.io
@@ -38,13 +41,26 @@ ppa.launchpadcontent.net
 launchpad.net
 
 # GitHub
-# github.com
+github.com
+api.github.com
+codeload.github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+
+# GitLab
+gitlab.com
+
+# Bitbucket
+bitbucket.org
 
 # OpenAI
 api.openai.com
 
 # OpenRouter
 openrouter.ai
+
+# AWS STS
+sts.amazonaws.com
 
 # AWS Bedrock - North America
 bedrock-runtime.us-east-1.amazonaws.com
