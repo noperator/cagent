@@ -12,6 +12,12 @@ ip link set dev eth0 mtu 1200 2>/dev/null || true
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
 sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
 
+# Start DNS logging
+DNS_LOG="/var/log/dns-queries.log"
+touch "$DNS_LOG" && chmod 644 "$DNS_LOG"
+tcpdump -i any -ln port 53 2>/dev/null >> "$DNS_LOG" &
+echo "DNS logging started: $DNS_LOG"
+
 # Start Docker daemon if running in Sysbox
 if [ "$CAGENT_DIND" = "1" ] && command -v dockerd >/dev/null 2>&1; then
     echo "Starting Docker daemon (Sysbox detected)..." >&2
