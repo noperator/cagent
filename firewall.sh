@@ -43,15 +43,10 @@ trap "rm -f $IP_LIST" EXIT
 echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | grep -v ':' | grep -v '^0\.' >>"$IP_LIST"
 
 # Resolve all domains in parallel via DoH
-DOMAIN_COUNT=$(grep -cvE '^#|^\s*$' "$DOMAINS_FILE" || echo 0)
 resolve_all_domains "$DOMAINS_FILE" >>"$IP_LIST"
-RESOLVED_IPS=$(grep -c '/32$' "$IP_LIST" || echo 0)
-echo "Resolved $DOMAIN_COUNT domains to $RESOLVED_IPS IPs"
 
 # Use aggregate to merge overlapping ranges and deduplicate
 ALL_IPS=$(aggregate -q <"$IP_LIST" | tr '\n' ',' | sed 's/,$//')
-TOTAL_RANGES=$(echo "$ALL_IPS" | tr ',' '\n' | wc -l)
-echo "Loaded $TOTAL_RANGES total IP ranges (including GitHub)"
 
 # Create nftables rules file
 NFT_RULES=$(mktemp)
@@ -105,15 +100,11 @@ if ! nft -f "$NFT_RULES"; then
     exit 1
 fi
 
-echo "Firewall configuration complete"
-
 # Start updater loop in background to periodically refresh allowed-domains set
 UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
 (
     while true; do
         sleep "$UPDATE_INTERVAL"
-
-        echo "$(date): Updating firewall allowed-domains set..."
 
         IP_LIST=$(mktemp)
 
@@ -139,18 +130,13 @@ UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
 
         # Build the elements string for nft
         ELEMENTS=$(echo "$ALL_IPS" | tr '\n' ',' | sed 's/,$//')
-        TOTAL_RANGES=$(echo "$ALL_IPS" | wc -l)
 
         # Update the set atomically (single transaction, no gap in coverage)
-        if nft -f - <<NFTEOF; then
+        if ! nft -f - <<NFTEOF; then
 flush set ip cagent allowed-domains
 add element ip cagent allowed-domains { $ELEMENTS }
 NFTEOF
-            echo "$(date): Updated allowed-domains set with $TOTAL_RANGES ranges"
-        else
             echo "$(date): ERROR: Failed to update allowed-domains set"
         fi
     done
 ) >>/var/log/firewall-updater.log 2>&1 &
-UPDATER_PID=$!
-echo "Firewall updater started (PID $UPDATER_PID, interval: ${UPDATE_INTERVAL}s)"

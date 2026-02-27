@@ -40,14 +40,15 @@ This project is an experimental work in progress. There are likely more opportun
 
 ### See also
 
+- https://github.com/trailofbits/claude-code-devcontainer
 - https://github.com/RchGrav/claudebox
 - https://github.com/anthropics/claude-code/tree/main/.devcontainer
 - https://www.anthropic.com/engineering/claude-code-sandboxing
 
 ### To-do
 
-- [ ] specify domains at runtime
+- [x] specify domains at runtime
 - [x] git-aware read-only mounts
-- [ ] refresh firewall after init
-- [ ] quiet down logging a bit
-- [ ] make ignore/readonly configurable
+- [x] refresh firewall after init
+- [x] quiet down logging a bit
+- [x] make ignore/readonly configurable

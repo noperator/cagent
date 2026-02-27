@@ -23,10 +23,8 @@ if (( 16#$bnd & (1 << 12) )); then
     DNS_LOG="/var/log/dns-queries.log"
     touch "$DNS_LOG" && chmod 644 "$DNS_LOG"
     tcpdump -i any -ln port 53 2>/dev/null >> "$DNS_LOG" &
-    echo "DNS logging started: $DNS_LOG"
 
     # Run firewall setup (also starts updater loop in background)
-    echo "Setting up firewall..."
     /usr/local/bin/firewall.sh /usr/local/etc/domains.txt
 
     # Drop CAP_NET_ADMIN and re-exec this script — will enter post-drop phase
@@ -38,16 +36,12 @@ fi
 # Post-drop phase — CAP_NET_ADMIN is absent
 # -------------------------------------------------------------------------
 
-echo "CAP_NET_ADMIN successfully dropped"
-
 # Start Docker daemon if running in Sysbox
 if [ "$CAGENT_DIND" = "1" ] && command -v dockerd >/dev/null 2>&1; then
-    echo "Starting Docker daemon (Sysbox detected)..." >&2
     dockerd --add-runtime=crun=/usr/bin/crun --default-runtime=crun >/var/log/dockerd.log 2>&1 &
 
     for i in $(seq 1 30); do
         if [ -S /var/run/docker.sock ]; then
-            echo "Docker daemon ready" >&2
             break
         fi
         sleep 1
