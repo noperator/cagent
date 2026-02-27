@@ -32,8 +32,6 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	}
 
 	args = append(args,
-		"--cap-drop=SETPCAP",
-		"--cap-drop=SETFCAP",
 		"--cap-add=NET_ADMIN",
 		"--cap-add=NET_RAW",
 		"-v", workspaceDir+":/workspace",
