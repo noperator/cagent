@@ -101,6 +101,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     aggregate \
     tcpdump \
+    libcap2-bin \
     # Git and GitHub
     git \
     gh \

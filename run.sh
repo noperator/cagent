@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+# set -euo pipefail
 
 WORKSPACE="$(pwd)"
 AGENTIGNORE_FILE=".agentignore"
