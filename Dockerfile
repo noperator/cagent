@@ -125,8 +125,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # LAYER 8: Sudo configuration (depends on utilities layer for sudo)
 # =============================================================================
 
-RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/firewall.sh" > /etc/sudoers.d/${USERNAME}-firewall && \
-    echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt" > /etc/sudoers.d/${USERNAME}-packages && \
+RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get --no-scripts *, /usr/bin/apt --no-scripts *" > /etc/sudoers.d/${USERNAME}-packages && \
     chmod 0440 /etc/sudoers.d/${USERNAME}-*
 
 # =============================================================================

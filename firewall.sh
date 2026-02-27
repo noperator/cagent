@@ -76,7 +76,13 @@ table ip cagent {
     }
 
     chain forward {
-        type filter hook forward priority 0; policy drop;
+        type filter hook forward priority filter; policy drop;
+        ct state established,related accept
+        tcp flags syn tcp option maxseg size set rt mtu
+        udp dport 53 accept
+        ip daddr @allowed-domains accept
+        log prefix "[cagent BLOCKED] " limit rate 5/second
+        reject with icmp admin-prohibited
     }
 
     chain output {
@@ -102,7 +108,7 @@ fi
 echo "Firewall configuration complete"
 
 # Start updater loop in background to periodically refresh allowed-domains set
-UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-300}"
+UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
 (
     while true; do
         sleep "$UPDATE_INTERVAL"
@@ -136,16 +142,15 @@ UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-300}"
         TOTAL_RANGES=$(echo "$ALL_IPS" | wc -l)
 
         # Update the set atomically (single transaction, no gap in coverage)
-        if nft -f - <<NFTEOF
+        if nft -f - <<NFTEOF; then
 flush set ip cagent allowed-domains
 add element ip cagent allowed-domains { $ELEMENTS }
 NFTEOF
-        then
             echo "$(date): Updated allowed-domains set with $TOTAL_RANGES ranges"
         else
             echo "$(date): ERROR: Failed to update allowed-domains set"
         fi
     done
-) &
+) >>/var/log/firewall-updater.log 2>&1 &
 UPDATER_PID=$!
 echo "Firewall updater started (PID $UPDATER_PID, interval: ${UPDATE_INTERVAL}s)"
