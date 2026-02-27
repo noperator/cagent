@@ -16,7 +16,7 @@ AI coding agents are powerful but difficult to constrain. cagent runs the agent 
 - **Network:** An nftables firewall allows outbound traffic only to an explicit domain allowlist. Domains are resolved at startup and refreshed every 60 seconds. Everything else is dropped.
 - **Filesystem:** The workspace is mounted into the container, but sensitive files and directories can be hidden entirely (shadowed with an empty placeholder) or made read-only. This prevents the agent from reading secrets, corrupting `.git` history, or modifying its own configuration.
 
-The agent runs as an unprivileged user. CAP_NET_ADMIN is dropped after firewall setup so no process inside the container (including privileged inner containers) can modify the firewall rules.
+The agent runs as an unprivileged user. CAP_NET_ADMIN and CAP_NET_RAW are dropped after firewall setup so no process inside the container (including privileged inner containers) can modify the firewall rules or craft raw packets to bypass them.
 
 ## Getting started
 
