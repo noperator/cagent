@@ -82,8 +82,9 @@ cagent -h
 Usage: cagent [options] [command...]
 
 Options:
-      --no-update               skip checking for updates
-      --reset string[="civd"]   remove cagent state and exit (c=containers, i=image, v=volume, d=directory; omit for all)
+      --no-update      skip checking for updates
+      --reset [civd]   remove specific cagent state and exit (any combo of: c=containers, i=image, v=volume, d=directory)
+      --reset-all      remove all cagent state and exit
 ```
 
 #### Modifying the image
@@ -101,15 +102,14 @@ If you've made local edits and an update is available, cagent will back up `~/.c
 To wipe all cagent state and start fresh:
 
 ```bash
-cagent --reset
+cagent --reset-all
 ```
 
 This removes running containers, the Docker image, the `cagent-home` volume, and `~/.cagent`. Workspace `.cagent.yaml` files are not affected. You can also reset individual components:
 
 ```bash
-cagent --reset=i    # image only
-cagent --reset=ci   # containers and image
-cagent --reset=civd # everything (same as --reset)
+cagent --reset ci           # containers and image only
+cagent --reset civd         # same as --reset-all
 ```
 
 ### Troubleshooting

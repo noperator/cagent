@@ -22,6 +22,12 @@ const (
 // single-character codes: c=containers, i=image, v=volume, d=directory.
 // Empty string means all components.
 func Reset(components string) error {
+	for _, r := range components {
+		if !strings.ContainsRune("civd", r) {
+			return fmt.Errorf("unknown reset component %q (valid: c=containers, i=image, v=volume, d=directory)", string(r))
+		}
+	}
+
 	all := components == ""
 	doC := all || strings.ContainsRune(components, 'c')
 	doI := all || strings.ContainsRune(components, 'i')
@@ -30,16 +36,16 @@ func Reset(components string) error {
 
 	fmt.Fprintf(os.Stderr, "This will remove:\n")
 	if doC {
-		fmt.Fprintf(os.Stderr, "  - all running cagent containers\n")
+		fmt.Fprintf(os.Stderr, "  c - all running cagent containers\n")
 	}
 	if doI {
-		fmt.Fprintf(os.Stderr, "  - the cagent Docker image\n")
+		fmt.Fprintf(os.Stderr, "  i - the cagent Docker image\n")
 	}
 	if doV {
-		fmt.Fprintf(os.Stderr, "  - the cagent-home volume\n")
+		fmt.Fprintf(os.Stderr, "  v - the cagent-home volume\n")
 	}
 	if doD {
-		fmt.Fprintf(os.Stderr, "  - ~/.cagent\n")
+		fmt.Fprintf(os.Stderr, "  d - ~/.cagent\n")
 	}
 	fmt.Fprintf(os.Stderr, "\nWorkspace .cagent.yaml files are not affected.\n\nContinue? [y/N] ")
 
