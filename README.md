@@ -79,12 +79,23 @@ See [`config-default.yaml`](config-default.yaml) for the full default config inc
 ```
 cagent -h
 
-Usage: cagent [options] [command...]
+Usage: cagent [options] [-- command...]
 
 Options:
       --no-update      skip checking for updates
       --reset [civd]   remove specific cagent state and exit (any combo of: c=containers, i=image, v=volume, d=directory)
       --reset-all      remove all cagent state and exit
+```
+
+Optionally pass a specific command to be executed, using `--` to separate cagent options from the command to run inside the container.
+
+```bash
+# Drop into a shell
+cagent
+
+# Run a specific command
+cagent -- claude -p "just say hello"
+cagent -- bash -c "echo hello"
 ```
 
 #### Modifying the image

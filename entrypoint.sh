@@ -55,8 +55,8 @@ fi
 # Update agent user to match workspace ownership
 WORKSPACE_UID=$(stat -c '%u' /workspace)
 WORKSPACE_GID=$(stat -c '%g' /workspace)
-usermod -u "$WORKSPACE_UID" cagent 2>/dev/null || true
-groupmod -g "$WORKSPACE_GID" cagent 2>/dev/null || true
+usermod -u "$WORKSPACE_UID" cagent >/dev/null 2>&1 || true
+groupmod -g "$WORKSPACE_GID" cagent >/dev/null 2>&1 || true
 
 cd /workspace
 exec gosu cagent "${@:-bash}"
