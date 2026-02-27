@@ -1,4 +1,13 @@
-Agent in a cage. Locks down the network and filesystem so an agent is free to explore the mounted workspace while reducing the risk of it going off the rails. 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="img/logo-dark.png">
+    <img alt="logo" src="img/logo-light.png" width="500px">
+  </picture>
+  <br>
+  Agent in a cage.
+</p>
+
+Locks down the network and filesystem so an agent is free to explore the mounted workspace while reducing the risk of it going off the rails. 
 
 ## Getting started
 
