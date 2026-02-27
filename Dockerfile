@@ -72,8 +72,8 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 
 RUN npm install -g @anthropic-ai/claude-code
 RUN npm install -g @openai/codex
-RUN npm install -g opencode-ai@latest
-RUN npm install -g @charmland/crush
+# RUN npm install -g opencode-ai@latest
+# RUN npm install -g @charmland/crush
 
 # =============================================================================
 # LAYER 6: Docker + crun (for optional Sysbox, rarely changes)
@@ -119,7 +119,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     cmake \
     gosu \
+    sqlite3 \
+    pipx \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
 # =============================================================================
 # LAYER 8: Sudo configuration (depends on utilities layer for sudo)
