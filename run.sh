@@ -15,7 +15,6 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     if docker info 2>/dev/null | grep -q "sysbox-runc"; then
         echo "Sysbox runtime detected, enabling Docker-in-Docker support..." >&2
         RUNTIME_ARGS+=(--runtime=sysbox-runc)
-        RUNTIME_ARGS+=(-v agent-docker:/var/lib/docker)
         RUNTIME_ARGS+=(-e CAGENT_DIND=1)
     else
         echo "Running on Linux without Sysbox (Docker-in-Docker unavailable)" >&2
