@@ -142,6 +142,9 @@ This project is an experimental work in progress. There are likely more opportun
 
 ### To-do
 
+- [ ] pass via config via CLI (in addition to file)
+- [ ] allow reading from host stdin (to be used in pipeline)
+
 <details><summary>Completed</summary>
 
 - [x] specify domains at runtime
