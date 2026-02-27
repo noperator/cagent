@@ -140,5 +140,5 @@ docker run -it --rm \
     $([ -f "$AGENTREADONLY_FILE" ] && echo '-v' "$WORKSPACE/$AGENTREADONLY_FILE:/workspace/$AGENTREADONLY_FILE:ro") \
     "${READONLY_VOLUMES[@]}" \
     "${EXCLUDE_VOLUMES[@]}" \
-    -v agent-home:/home/agent \
+    -v cagent-home:/home/cagent \
     cagent "$@"

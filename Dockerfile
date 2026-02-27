@@ -48,7 +48,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # LAYER 3: User setup (rarely changes)
 # =============================================================================
 
-ARG USERNAME=agent
+ARG USERNAME=cagent
 RUN useradd -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME}:${USERNAME}" | chpasswd
 
