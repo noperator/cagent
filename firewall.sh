@@ -76,7 +76,13 @@ table ip cagent {
     }
 
     chain forward {
-        type filter hook forward priority 0; policy drop;
+        type filter hook forward priority filter; policy drop;
+        ct state established,related accept
+        tcp flags syn tcp option maxseg size set rt mtu
+        udp dport 53 accept
+        ip daddr @allowed-domains accept
+        log prefix "[cagent BLOCKED] " limit rate 5/second
+        reject with icmp admin-prohibited
     }
 
     chain output {
@@ -99,21 +105,52 @@ if ! nft -f "$NFT_RULES"; then
     exit 1
 fi
 
-# Cache for watchdog to use
-cp "$NFT_RULES" /var/cache/firewall-rules.nft
-
 echo "Firewall configuration complete"
 
-# Start watchdog unless --no-watchdog flag passed
-if [[ "${2:-}" != "--no-watchdog" ]]; then
-    (
-        while true; do
-            if ! nft list chain ip cagent output 2>/dev/null | grep -q "@allowed-domains"; then
-                echo "$(date): Tampering detected, restoring..."
-                nft -f /var/cache/firewall-rules.nft
-            fi
-            sleep 0.1
-        done
-    ) &
-    echo "Firewall watchdog started (PID $!)"
-fi
+# Start updater loop in background to periodically refresh allowed-domains set
+UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
+(
+    while true; do
+        sleep "$UPDATE_INTERVAL"
+
+        echo "$(date): Updating firewall allowed-domains set..."
+
+        IP_LIST=$(mktemp)
+
+        # Fetch GitHub IP ranges
+        gh_ranges=$(curl -s https://api.github.com/meta 2>/dev/null || true)
+        if [ -n "$gh_ranges" ] && echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null 2>&1; then
+            echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | grep -v ':' | grep -v '^0\.' >>"$IP_LIST"
+        else
+            echo "$(date): Warning: Failed to fetch GitHub IP ranges, skipping GitHub update"
+        fi
+
+        # Resolve all domains via DoH
+        resolve_all_domains "$DOMAINS_FILE" >>"$IP_LIST"
+
+        # Merge overlapping ranges and deduplicate
+        ALL_IPS=$(aggregate -q <"$IP_LIST" 2>/dev/null || cat "$IP_LIST")
+        rm -f "$IP_LIST"
+
+        if [ -z "$ALL_IPS" ]; then
+            echo "$(date): Warning: No IPs resolved, skipping update"
+            continue
+        fi
+
+        # Build the elements string for nft
+        ELEMENTS=$(echo "$ALL_IPS" | tr '\n' ',' | sed 's/,$//')
+        TOTAL_RANGES=$(echo "$ALL_IPS" | wc -l)
+
+        # Update the set atomically (single transaction, no gap in coverage)
+        if nft -f - <<NFTEOF; then
+flush set ip cagent allowed-domains
+add element ip cagent allowed-domains { $ELEMENTS }
+NFTEOF
+            echo "$(date): Updated allowed-domains set with $TOTAL_RANGES ranges"
+        else
+            echo "$(date): ERROR: Failed to update allowed-domains set"
+        fi
+    done
+) >>/var/log/firewall-updater.log 2>&1 &
+UPDATER_PID=$!
+echo "Firewall updater started (PID $UPDATER_PID, interval: ${UPDATE_INTERVAL}s)"

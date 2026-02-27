@@ -48,7 +48,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # LAYER 3: User setup (rarely changes)
 # =============================================================================
 
-ARG USERNAME=agent
+ARG USERNAME=cagent
 RUN useradd -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME}:${USERNAME}" | chpasswd
 
@@ -72,8 +72,8 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 
 RUN npm install -g @anthropic-ai/claude-code
 RUN npm install -g @openai/codex
-RUN npm install -g opencode-ai@latest
-RUN npm install -g @charmland/crush
+# RUN npm install -g opencode-ai@latest
+# RUN npm install -g @charmland/crush
 
 # =============================================================================
 # LAYER 6: Docker + crun (for optional Sysbox, rarely changes)
@@ -101,6 +101,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     aggregate \
     tcpdump \
+    libcap2-bin \
     # Git and GitHub
     git \
     gh \
@@ -118,14 +119,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     cmake \
     gosu \
+    sqlite3 \
+    pipx \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
 # =============================================================================
 # LAYER 8: Sudo configuration (depends on utilities layer for sudo)
 # =============================================================================
 
-RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/local/bin/firewall.sh" > /etc/sudoers.d/${USERNAME}-firewall && \
-    echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt" > /etc/sudoers.d/${USERNAME}-packages && \
+RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get --no-scripts *, /usr/bin/apt --no-scripts *" > /etc/sudoers.d/${USERNAME}-packages && \
     chmod 0440 /etc/sudoers.d/${USERNAME}-*
 
 # =============================================================================
