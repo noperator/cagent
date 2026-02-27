@@ -18,6 +18,72 @@ const (
 	imageName = "cagent"
 )
 
+// Reset removes selected cagent state. components is a string of
+// single-character codes: c=containers, i=image, v=volume, d=directory.
+// Empty string means all components.
+func Reset(components string) error {
+	all := components == ""
+	doC := all || strings.ContainsRune(components, 'c')
+	doI := all || strings.ContainsRune(components, 'i')
+	doV := all || strings.ContainsRune(components, 'v')
+	doD := all || strings.ContainsRune(components, 'd')
+
+	fmt.Fprintf(os.Stderr, "This will remove:\n")
+	if doC {
+		fmt.Fprintf(os.Stderr, "  - all running cagent containers\n")
+	}
+	if doI {
+		fmt.Fprintf(os.Stderr, "  - the cagent Docker image\n")
+	}
+	if doV {
+		fmt.Fprintf(os.Stderr, "  - the cagent-home volume\n")
+	}
+	if doD {
+		fmt.Fprintf(os.Stderr, "  - ~/.cagent\n")
+	}
+	fmt.Fprintf(os.Stderr, "\nWorkspace .cagent.yaml files are not affected.\n\nContinue? [y/N] ")
+
+	var response string
+	fmt.Fscan(os.Stdin, &response)
+	if response != "y" && response != "Y" {
+		fmt.Fprintf(os.Stderr, "Aborted.\n")
+		return nil
+	}
+
+	if doC {
+		out, err := exec.Command("docker", "ps", "-q", "--filter", "ancestor="+imageName).Output()
+		if err != nil {
+			return fmt.Errorf("list containers: %w", err)
+		}
+		for _, id := range strings.Fields(string(out)) {
+			if err := exec.Command("docker", "rm", "-f", id).Run(); err != nil {
+				return fmt.Errorf("remove container %s: %w", id, err)
+			}
+		}
+	}
+
+	if doI {
+		exec.Command("docker", "rmi", imageName).Run() // ignore error — may not exist
+	}
+
+	if doV {
+		exec.Command("docker", "volume", "rm", "cagent-home").Run() // ignore error — may not exist
+	}
+
+	if doD {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("get home dir: %w", err)
+		}
+		if err := os.RemoveAll(filepath.Join(home, ".cagent")); err != nil {
+			return fmt.Errorf("remove ~/.cagent: %w", err)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "Reset complete. Run cagent again to start fresh.\n")
+	return nil
+}
+
 // cagentHome returns the path to ~/.cagent, creating it if necessary.
 func cagentHome() (string, error) {
 	home, err := os.UserHomeDir()

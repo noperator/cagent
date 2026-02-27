@@ -47,8 +47,12 @@ This project is an experimental work in progress. There are likely more opportun
 
 ### To-do
 
+<details><summary>Completed</summary>
+
 - [x] specify domains at runtime
 - [x] git-aware read-only mounts
 - [x] refresh firewall after init
 - [x] quiet down logging a bit
 - [x] make ignore/readonly configurable
+
+</details>
