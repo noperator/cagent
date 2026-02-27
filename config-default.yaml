@@ -1,0 +1,95 @@
+# Patterns to hide from the agent (shadowed with empty file/dir).
+ignore:
+  - "*.bak"
+  - "*.tmp"
+
+# Patterns to mount read-only.
+readonly:
+  - .git
+  - .env
+  - .cagent.yaml
+
+# Domains the agent is allowed to reach.
+# Workspace .cagent.yaml can add more (additive, not replacing).
+domains:
+  # Anthropic
+  - api.anthropic.com
+  - sentry.io
+  - statsig.anthropic.com
+  - statsig.com
+
+  # Node.js/npm
+  - registry.npmjs.org
+  - deb.nodesource.com
+
+  # Python packages
+  - pypi.org
+  - files.pythonhosted.org
+
+  # Go packages
+  - dl.google.com
+  - go.dev
+  - golang.org
+  - google.golang.org
+  - gopkg.in
+  - goproxy.io
+  - pkg.go.dev
+  - proxy.golang.org
+  - storage.googleapis.com
+  - sum.golang.org
+
+  # Rust packages
+  - crates.io
+  - static.crates.io
+  - index.crates.io
+
+  # Ubuntu/Debian packages
+  - archive.ubuntu.com
+  - security.ubuntu.com
+  - ports.ubuntu.com
+
+  # Ubuntu PPAs (deadsnakes, golang-backports, etc.)
+  - ppa.launchpadcontent.net
+  - launchpad.net
+
+  # GitHub
+  - github.com
+  - api.github.com
+  - codeload.github.com
+  - raw.githubusercontent.com
+  - objects.githubusercontent.com
+
+  # GitLab
+  - gitlab.com
+
+  # Bitbucket
+  - bitbucket.org
+
+  # OpenAI
+  - api.openai.com
+
+  # OpenRouter
+  - openrouter.ai
+
+  # Docker Hub
+  - registry-1.docker.io
+  - auth.docker.io
+  - production.cloudflare.docker.com
+  - docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com
+  - hub.docker.com
+
+  # Cloudflare
+  - cloudflare-dns.com
+
+  # AWS STS
+  - sts.amazonaws.com
+
+  # AWS Bedrock - North America
+  - bedrock-runtime.us-east-1.amazonaws.com
+  - bedrock.us-east-1.amazonaws.com
+  - bedrock-runtime.us-east-2.amazonaws.com
+  - bedrock.us-east-2.amazonaws.com
+  - bedrock-runtime.us-west-1.amazonaws.com
+  - bedrock.us-west-1.amazonaws.com
+  - bedrock-runtime.us-west-2.amazonaws.com
+  - bedrock.us-west-2.amazonaws.com

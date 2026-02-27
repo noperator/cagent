@@ -137,7 +137,6 @@ RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get --no-scripts *, /usr
 # =============================================================================
 
 COPY firewall.sh /usr/local/bin/
-COPY domains.txt /usr/local/etc/
 COPY entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/firewall.sh /usr/local/bin/entrypoint.sh
 

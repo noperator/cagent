@@ -5,13 +5,12 @@ IFS=$'\n\t'
 
 DOMAINS_FILE="$1"
 
-# Resolve all domains in parallel via DoH (bypasses local DNS interception)
+# Resolve all domains in parallel using 8.8.4.4 (distinct from container's
+# 8.8.8.8 so firewall queries can be filtered out of the tcpdump log)
 resolve_all_domains() {
     local domains_file="$1"
     grep -vE '^#|^\s*$' "$domains_file" | xargs -P 20 -I {} sh -c '
-        curl -s "https://cloudflare-dns.com/dns-query?name={}&type=A" \
-            -H "accept: application/dns-json" 2>/dev/null | \
-            jq -r ".Answer[]? | select(.type == 1) | .data" 2>/dev/null
+        dig +short "{}" A @8.8.4.4 2>/dev/null
     ' | grep -E '^[1-9][0-9]*\.[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/$/\/32/'
 }
 
@@ -42,16 +41,11 @@ trap "rm -f $IP_LIST" EXIT
 # Add GitHub CIDRs (filter out IPv6 and bogus)
 echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | grep -v ':' | grep -v '^0\.' >>"$IP_LIST"
 
-# Resolve all domains in parallel via DoH
-DOMAIN_COUNT=$(grep -cvE '^#|^\s*$' "$DOMAINS_FILE" || echo 0)
+# Resolve all domains in parallel
 resolve_all_domains "$DOMAINS_FILE" >>"$IP_LIST"
-RESOLVED_IPS=$(grep -c '/32$' "$IP_LIST" || echo 0)
-echo "Resolved $DOMAIN_COUNT domains to $RESOLVED_IPS IPs"
 
 # Use aggregate to merge overlapping ranges and deduplicate
 ALL_IPS=$(aggregate -q <"$IP_LIST" | tr '\n' ',' | sed 's/,$//')
-TOTAL_RANGES=$(echo "$ALL_IPS" | tr ',' '\n' | wc -l)
-echo "Loaded $TOTAL_RANGES total IP ranges (including GitHub)"
 
 # Create nftables rules file
 NFT_RULES=$(mktemp)
@@ -105,15 +99,11 @@ if ! nft -f "$NFT_RULES"; then
     exit 1
 fi
 
-echo "Firewall configuration complete"
-
 # Start updater loop in background to periodically refresh allowed-domains set
 UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
 (
     while true; do
         sleep "$UPDATE_INTERVAL"
-
-        echo "$(date): Updating firewall allowed-domains set..."
 
         IP_LIST=$(mktemp)
 
@@ -125,7 +115,7 @@ UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
             echo "$(date): Warning: Failed to fetch GitHub IP ranges, skipping GitHub update"
         fi
 
-        # Resolve all domains via DoH
+        # Resolve all domains
         resolve_all_domains "$DOMAINS_FILE" >>"$IP_LIST"
 
         # Merge overlapping ranges and deduplicate
@@ -139,18 +129,16 @@ UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
 
         # Build the elements string for nft
         ELEMENTS=$(echo "$ALL_IPS" | tr '\n' ',' | sed 's/,$//')
-        TOTAL_RANGES=$(echo "$ALL_IPS" | wc -l)
 
         # Update the set atomically (single transaction, no gap in coverage)
-        if nft -f - <<NFTEOF; then
+        if ! nft -f - <<NFTEOF; then
 flush set ip cagent allowed-domains
 add element ip cagent allowed-domains { $ELEMENTS }
 NFTEOF
-            echo "$(date): Updated allowed-domains set with $TOTAL_RANGES ranges"
-        else
             echo "$(date): ERROR: Failed to update allowed-domains set"
+        else
+            TOTAL_RANGES=$(echo "$ALL_IPS" | tr ',' '\n' | wc -l | tr -d ' ')
+            echo "$(date): Updated allowed-domains set with $TOTAL_RANGES ranges"
         fi
     done
 ) >>/var/log/firewall-updater.log 2>&1 &
-UPDATER_PID=$!
-echo "Firewall updater started (PID $UPDATER_PID, interval: ${UPDATE_INTERVAL}s)"
