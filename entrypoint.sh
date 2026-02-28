@@ -58,5 +58,9 @@ WORKSPACE_GID=$(stat -c '%g' /workspace)
 usermod -u "$WORKSPACE_UID" cagent >/dev/null 2>&1 || true
 groupmod -g "$WORKSPACE_GID" cagent >/dev/null 2>&1 || true
 
+if [ -n "$CAGENT_TITLE" ]; then
+    echo -ne "\e]2;${CAGENT_TITLE}\007" > /dev/tty 2>/dev/null || true
+fi
+
 cd /workspace
 exec gosu cagent "${@:-bash}"

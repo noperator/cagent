@@ -63,6 +63,10 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	// Extra args from config.
 	args = append(args, cfg.ExtraArgs...)
 
+	if title := os.Getenv("CAGENT_TITLE"); title != "" {
+		args = append(args, "-e", "CAGENT_TITLE="+title)
+	}
+
 	// Image name.
 	args = append(args, imageName)
 
