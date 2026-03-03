@@ -16,8 +16,8 @@ if (( 16#$bnd & (1 << 12) )); then
     ip link set dev eth0 mtu 1200 2>/dev/null || true
 
     # Disable IPv6
-    sysctl -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
-    sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
 
     # Start DNS logging
     DNS_LOG="/var/log/dns-queries.log"
