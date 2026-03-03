@@ -1,4 +1,4 @@
-package cagent
+package membrane
 
 import (
 	"io/fs"
@@ -23,7 +23,7 @@ func scan(workspaceDir string, cfg *config) (*mounts, error) {
 	// Create temp empty file and dir for shadowing ignored paths.
 	// Not cleaned up: syscall.Exec replaces this process so defers won't
 	// run, and the OS handles /tmp cleanup.
-	tmpDir, err := os.MkdirTemp("", "cagent-")
+	tmpDir, err := os.MkdirTemp("", "membrane-")
 	if err != nil {
 		return nil, err
 	}

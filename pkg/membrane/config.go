@@ -1,4 +1,4 @@
-package cagent
+package membrane
 
 import (
 	"fmt"
@@ -16,16 +16,16 @@ type config struct {
 	Domains   []string `yaml:"domains"`
 }
 
-// loadConfig loads and merges local (~/.cagent/config.yaml) and workspace
-// (.cagent.yaml) configs. Workspace config lists are appended to local lists.
+// loadConfig loads and merges local (~/.membrane/config.yaml) and workspace
+// (.membrane.yaml) configs. Workspace config lists are appended to local lists.
 func loadConfig(workspaceDir string) (*config, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("get home dir: %w", err)
 	}
 
-	localPath := filepath.Join(home, ".cagent", "config.yaml")
-	workspacePath := filepath.Join(workspaceDir, ".cagent.yaml")
+	localPath := filepath.Join(home, ".membrane", "config.yaml")
+	workspacePath := filepath.Join(workspaceDir, ".membrane.yaml")
 
 	localCfg, localErr := loadConfigFile(localPath)
 	workspace, workspaceErr := loadConfigFile(workspacePath)

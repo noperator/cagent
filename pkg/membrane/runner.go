@@ -1,4 +1,4 @@
-package cagent
+package membrane
 
 import (
 	"crypto/rand"
@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -36,11 +37,11 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 
 	var suffix [8]byte
 	_, _ = rand.Read(suffix[:])
-	containerName := "cagent-" + hex.EncodeToString(suffix[:])
+	containerName := "membrane-" + hex.EncodeToString(suffix[:])
 	args := []string{"run", "-it", "--rm", "--init", "--name", containerName}
 
 	if sysbox {
-		args = append(args, "--runtime=sysbox-runc", "-e", "CAGENT_DIND=1")
+		args = append(args, "--runtime=sysbox-runc", "-e", "MEMBRANE_DIND=1")
 	}
 
 	args = append(args,
@@ -62,7 +63,15 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 		}
 	}
 
-	args = append(args, "-v", "cagent-home:/home/cagent")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("get home dir: %w", err)
+	}
+	agentHome := filepath.Join(home, ".membrane", "home")
+	if err := os.MkdirAll(agentHome, 0755); err != nil {
+		return nil, "", fmt.Errorf("create agent home dir: %w", err)
+	}
+	args = append(args, "-v", agentHome+":/home/agent")
 
 	// Write merged domains list to a temp file and mount it where
 	// firewall.sh expects it.
@@ -75,14 +84,14 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	// Extra args from config.
 	args = append(args, cfg.ExtraArgs...)
 
-	if title := os.Getenv("CAGENT_TITLE"); title != "" {
-		args = append(args, "-e", "CAGENT_TITLE="+title)
+	if title := os.Getenv("MEMBRANE_TITLE"); title != "" {
+		args = append(args, "-e", "MEMBRANE_TITLE="+title)
 	}
 
 	// Image name.
 	args = append(args, imageName)
 
-	// Passthrough args (non-flag arguments to cagent binary).
+	// Passthrough args (non-flag arguments to membrane binary).
 	args = append(args, passthrough...)
 
 	return args, containerName, nil
@@ -93,9 +102,9 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 // OS handles /tmp cleanup.
 func writeDomains(domains []string) (string, error) {
 	if len(domains) == 0 {
-		return "", fmt.Errorf("domains list is empty — add domains to ~/.cagent/config.yaml")
+		return "", fmt.Errorf("domains list is empty — add domains to ~/.membrane/config.yaml")
 	}
-	f, err := os.CreateTemp("", "cagent-domains-")
+	f, err := os.CreateTemp("", "membrane-domains-")
 	if err != nil {
 		return "", fmt.Errorf("create domains temp file: %w", err)
 	}
@@ -125,8 +134,8 @@ func execDocker(args []string) error {
 
 	cmd := exec.Command(dockerPath, args...)
 
-	// cagent is assumed to always run interactively. If non-interactive support
-	// is needed in the future (e.g. piped stdin via `echo data | cagent -- ...`),
+	// membrane is assumed to always run interactively. If non-interactive support
+	// is needed in the future (e.g. piped stdin via `echo data | membrane -- ...`),
 	// detect with term.IsTerminal(int(os.Stdin.Fd())) and branch: skip the PTY,
 	// set cmd.Stdin/Stdout/Stderr = os.Stdin/Out/Err directly, and handle signals
 	// the same way.

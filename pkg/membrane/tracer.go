@@ -1,7 +1,7 @@
 // Tracer implementation inspired by the dyana project:
 // https://github.com/dreadnode/dyana/blob/main/dyana/tracer/tracee.py
 
-package cagent
+package membrane
 
 import (
 	"bufio"
@@ -39,8 +39,8 @@ var traceeEvents = []string{
 // NewTracer creates a Tracer that will trace the given agent container name
 // and write events to traceFile.
 func NewTracer(agentContainerName, traceFile string) *Tracer {
-	// Reuse the hex suffix from the agent container name (cagent-<hex>).
-	suffix := strings.TrimPrefix(agentContainerName, "cagent-")
+	// Reuse the hex suffix from the agent container name (membrane-<hex>).
+	suffix := strings.TrimPrefix(agentContainerName, "membrane-")
 	return &Tracer{
 		containerName: "tracee-" + suffix,
 		traceFile:     traceFile,

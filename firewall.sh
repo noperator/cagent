@@ -52,9 +52,9 @@ NFT_RULES=$(mktemp)
 trap "rm -f $IP_LIST $NFT_RULES" EXIT
 
 cat >"$NFT_RULES" <<EOF
-table ip cagent
-delete table ip cagent
-table ip cagent {
+table ip membrane
+delete table ip membrane
+table ip membrane {
     set allowed-domains {
         type ipv4_addr
         flags interval
@@ -75,7 +75,7 @@ table ip cagent {
         tcp flags syn tcp option maxseg size set rt mtu
         udp dport 53 accept
         ip daddr @allowed-domains accept
-        log prefix "[cagent BLOCKED] " limit rate 5/second
+        log prefix "[membrane BLOCKED] " limit rate 5/second
         reject with icmp admin-prohibited
     }
 
@@ -87,7 +87,7 @@ table ip cagent {
         udp dport 53 accept
         tcp dport 22 accept
         ip daddr @allowed-domains accept
-        log prefix "[cagent BLOCKED] " limit rate 5/second
+        log prefix "[membrane BLOCKED] " limit rate 5/second
         reject with icmp type admin-prohibited
     }
 }
@@ -132,8 +132,8 @@ UPDATE_INTERVAL="${FIREWALL_UPDATE_INTERVAL:-60}"
 
         # Update the set atomically (single transaction, no gap in coverage)
         if ! nft -f - <<NFTEOF; then
-flush set ip cagent allowed-domains
-add element ip cagent allowed-domains { $ELEMENTS }
+flush set ip membrane allowed-domains
+add element ip membrane allowed-domains { $ELEMENTS }
 NFTEOF
             echo "$(date): ERROR: Failed to update allowed-domains set"
         else

@@ -1,4 +1,4 @@
-package cagent
+package membrane
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Run is the main entry point called from cmd/cagent/main.go.
+// Run is the main entry point called from cmd/membrane/main.go.
 // passthrough args are forwarded as the container command.
 func Run(noUpdate bool, trace bool, traceLog string, passthrough []string) error {
 	repoDir, err := ensureRepo()
@@ -26,8 +26,8 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string) error
 	if err != nil {
 		return fmt.Errorf("get home dir: %w", err)
 	}
-	cagentDir := filepath.Join(home, ".cagent")
-	if err := writeDefaultConfig(cagentDir); err != nil {
+	membraneDir := filepath.Join(home, ".membrane")
+	if err := writeDefaultConfig(membraneDir); err != nil {
 		return err
 	}
 
@@ -71,7 +71,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string) error
 	// Resolve trace log path.
 	traceLogFile := traceLog
 	if traceLogFile == "" {
-		traceLogFile = filepath.Join(cagentDir, "trace", containerName+".jsonl.gz")
+		traceLogFile = filepath.Join(membraneDir, "trace", containerName+".jsonl.gz")
 	}
 	if err := os.MkdirAll(filepath.Dir(traceLogFile), 0o755); err != nil {
 		return fmt.Errorf("create trace dir: %w", err)
@@ -121,7 +121,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string) error
 	case <-ctx.Done():
 		// Signal received; stop the agent container so execDocker unblocks
 		// and restores the terminal. Tracee cleaned up by deferred tracer.Stop().
-		fmt.Fprintln(os.Stderr, "\r\ncagent: stopping...")
+		fmt.Fprintln(os.Stderr, "\r\nmembrane: stopping...")
 		_ = exec.Command("docker", "stop", "-t", "2", containerName).Run()
 		<-agentErr
 	}
