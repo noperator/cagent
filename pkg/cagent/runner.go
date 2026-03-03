@@ -1,12 +1,20 @@
 package cagent
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/creack/pty/v2"
+	"golang.org/x/term"
 )
 
 func hasSysbox() bool {
@@ -22,10 +30,14 @@ func hasSysbox() bool {
 
 // buildArgs constructs the full argument list for docker run.
 // passthrough args are appended after the image name as the container command.
-func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string) ([]string, error) {
+// Returns the args, the generated container name, and any error.
+func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string) ([]string, string, error) {
 	sysbox := hasSysbox()
 
-	args := []string{"run", "-it", "--rm"}
+	var suffix [8]byte
+	_, _ = rand.Read(suffix[:])
+	containerName := "cagent-" + hex.EncodeToString(suffix[:])
+	args := []string{"run", "-it", "--rm", "--init", "--name", containerName}
 
 	if sysbox {
 		args = append(args, "--runtime=sysbox-runc", "-e", "CAGENT_DIND=1")
@@ -56,7 +68,7 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	// firewall.sh expects it.
 	domainsFile, err := writeDomains(cfg.Domains)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	args = append(args, "-v", domainsFile+":/usr/local/etc/domains.txt:ro")
 
@@ -73,7 +85,7 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	// Passthrough args (non-flag arguments to cagent binary).
 	args = append(args, passthrough...)
 
-	return args, nil
+	return args, containerName, nil
 }
 
 // writeDomains writes the domains list to a temp file and returns its path.
@@ -94,13 +106,80 @@ func writeDomains(domains []string) (string, error) {
 	return f.Name(), nil
 }
 
-// execDocker replaces the current process with docker run.
+// ExitError carries the exit code from the docker run child process.
+type ExitError struct {
+	Code int
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("docker exited with code %d", e.Code)
+}
+
+// execDocker runs docker as a child process with a PTY, proxies the
+// terminal, forwards signals, and returns the child's exit code.
 func execDocker(args []string) error {
 	dockerPath, err := exec.LookPath("docker")
 	if err != nil {
 		return fmt.Errorf("docker not found in PATH: %w", err)
 	}
 
-	argv := append([]string{"docker"}, args...)
-	return syscall.Exec(dockerPath, argv, os.Environ())
+	cmd := exec.Command(dockerPath, args...)
+
+	// cagent is assumed to always run interactively. If non-interactive support
+	// is needed in the future (e.g. piped stdin via `echo data | cagent -- ...`),
+	// detect with term.IsTerminal(int(os.Stdin.Fd())) and branch: skip the PTY,
+	// set cmd.Stdin/Stdout/Stderr = os.Stdin/Out/Err directly, and handle signals
+	// the same way.
+	//
+	// Allocate a PTY and start the child process.
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return fmt.Errorf("start docker: %w", err)
+	}
+	defer ptmx.Close()
+
+	// Propagate terminal resize events.
+	resizeCh := make(chan os.Signal, 1)
+	signal.Notify(resizeCh, syscall.SIGWINCH)
+	defer signal.Stop(resizeCh)
+	go func() {
+		for range resizeCh {
+			if ws, err := pty.GetsizeFull(os.Stdin); err == nil {
+				_ = pty.Setsize(ptmx, ws)
+			}
+		}
+	}()
+	resizeCh <- syscall.SIGWINCH // set initial size
+
+	// Put the host terminal into raw mode; restore on exit.
+	fd := int(os.Stdin.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return fmt.Errorf("set terminal raw mode: %w", err)
+	}
+	defer func() { _ = term.Restore(fd, oldState) }()
+
+	// Forward SIGINT, SIGTERM, and SIGHUP to the child process.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+	go func() {
+		for sig := range sigCh {
+			_ = cmd.Process.Signal(sig)
+		}
+	}()
+
+	// Proxy I/O between the host terminal and the PTY.
+	go func() { _, _ = io.Copy(ptmx, os.Stdin) }()
+	_, _ = io.Copy(os.Stdout, ptmx)
+
+	// Wait for the child to exit.
+	if err := cmd.Wait(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return &ExitError{Code: exitErr.ExitCode()}
+		}
+		return fmt.Errorf("docker run: %w", err)
+	}
+	return nil
 }

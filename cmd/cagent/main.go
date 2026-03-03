@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 
@@ -11,9 +13,11 @@ import (
 
 func main() {
 	noUpdate := flag.Bool("no-update", false, "skip checking for updates")
+	noTrace := flag.Bool("no-trace", false, "disable Tracee eBPF sidecar")
+	traceLog := flag.String("trace-log", "", "path for trace log file (default: ~/.cagent/trace/<id>.jsonl.gz)")
 	var reset stringFlag
-	flag.Var(&reset, "reset", "remove specific cagent state and exit (any combo of: c=containers, i=image, v=volume, d=directory)")
-	resetAll := flag.Bool("reset-all", false, "remove all cagent state and exit")
+	flag.Var(&reset, "reset", "remove cagent state and exit (c=containers, i=image, v=volume, d=directory)")
+	flag.Lookup("reset").NoOptDefVal = "civd"
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "cagent: Agent in a cage.\n\n")
 		fmt.Fprintf(os.Stderr, "Locks down the network and filesystem so an agent is free to explore\n")
@@ -24,12 +28,14 @@ func main() {
 	}
 	flag.Parse()
 
-	if *resetAll {
-		if err := cagent.Reset("civd"); err != nil {
-			fmt.Fprintf(os.Stderr, "cagent: %v\n", err)
+	for _, arg := range os.Args[1:] {
+		if arg == "--" {
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			fmt.Fprintf(os.Stderr, "cagent: unexpected argument %q\n", arg)
 			os.Exit(1)
 		}
-		return
 	}
 
 	if isFlagPassed("reset") {
@@ -40,7 +46,11 @@ func main() {
 		return
 	}
 
-	if err := cagent.Run(*noUpdate, flag.Args()); err != nil {
+	if err := cagent.Run(*noUpdate, !*noTrace, *traceLog, flag.Args()); err != nil {
+		var exitErr *cagent.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.Code)
+		}
 		fmt.Fprintf(os.Stderr, "cagent: %v\n", err)
 		os.Exit(1)
 	}
@@ -61,4 +71,5 @@ type stringFlag struct{ val string }
 
 func (f *stringFlag) String() string { return f.val }
 func (f *stringFlag) Set(v string) error { f.val = v; return nil }
-func (f *stringFlag) Type() string { return "[civd]" }
+func (f *stringFlag) Type() string { return "" }
+
