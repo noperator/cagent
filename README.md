@@ -4,31 +4,32 @@
     <img alt="logo" src="img/logo-light.png" width="500px">
   </picture>
   <br>
-  Agent in a cage.
+  Selectively permeable boundary for AI agents.
 </p>
-
-Locks down the network and filesystem so an agent is free to explore the mounted workspace while reducing the risk of it going off the rails.
 
 ## Description
 
-membrane runs your AI agent inside a Docker container with two hard constraints:
+Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you real-time visibility into everything that your agent does.
 
-- **Network:** An nftables firewall allows outbound traffic only to an explicit domain allowlist. Domains are resolved at startup and refreshed continuously. Everything else is dropped.
-- **Filesystem:** The workspace is mounted into the container, but sensitive files and directories can be hidden entirely (shadowed with an empty placeholder) or made read-only. This prevents the agent from reading secrets, corrupting `.git` history, or modifying its own configuration.
+## Features
 
-The agent runs as an unprivileged user. CAP_NET_ADMIN and CAP_NET_RAW are dropped after firewall setup so no process inside the container (including privileged inner containers) can modify the firewall rules or craft raw packets to bypass them.
+| | Membrane | Others |
+|---|---|---|
+| **Network** | Approved hostnames are whitelisted, DNS-resolved at startup, and refreshed continuously | Generally unsupported, or requires manual iptables rules that are easy to misconfigure |
+| **Filesystem** | Sensitive files shadowed with empty placeholders so the agent sees they exist but cannot read them; other paths mounted read-only | No granular controls on top of bind mounts |
+| **Observability** | eBPF traces *everything* that crosses the boundary: processes, DNS queries, file opens, network connections | No runtime visibility into what the agent is actually doing |
+| **Nested containers** | Docker-in-Docker via Sysbox, no privileged mode or hypervisor required | Requires `--privileged` (unsafe) or full microVM |
+| **Agent compatibility** | Wraps any process, agent-agnostic by design | Tightly coupled to a specific agent (Claude Code, Codex, etc.) |
+| **OS support** | Linux and macOS via Docker; strong enforcement on both platforms | Enforcement mechanisms are often platform-specific: nftables and Landlock are Linux-only, Seatbelt is macOS-only |
+| **Overhead** | Container-based, near-zero startup overhead on top of Docker | MicroVM-based tools require a separate kernel and hypervisor |
 
 ## Getting started
-
-### Prerequisites
-
-- Docker
-- Linux with [Sysbox](https://github.com/nestybox/sysbox#installation) if you want to run nested Docker-in-Docker containers
 
 ### Install
 
 ```bash
 go install github.com/noperator/membrane/cmd/membrane@latest
+ln -s $(go env GOPATH)/bin/membrane $(go env GOPATH)/bin/mb  # optional short alias
 ```
 
 On first run, membrane will clone the repo to `~/.membrane/src/`, build the Docker image, and write a default config to `~/.membrane/config.yaml`. Subsequent runs check for updates automatically.
@@ -256,7 +257,7 @@ See [`config-default.yaml`](config-default.yaml) for the full default config inc
 
 This project is an experimental work in progress. There are likely more opportunities to lock this down further. A few common issues:
 
-- **Network not working for a domain that should be allowed:** The firewall resolves domains to IPs at startup. If a CDN rotates IPs, the connection may fail until the next refresh (every 60s). Check `/var/log/firewall-updater.log` inside the container for refresh status.
+- **Network not working:** The firewall resolves domains to IPs at startup. If a CDN rotates IPs, the connection may fail until the next refresh (every 60s). Check `/var/log/firewall-updater.log` inside the container for refresh status.
 
 - **Docker-in-Docker not working:** Sysbox must be installed on the host. membrane detects it automatically; if it's not present, Docker-in-Docker is silently disabled.
 
