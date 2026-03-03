@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -62,7 +63,15 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 		}
 	}
 
-	args = append(args, "-v", "membrane-home:/home/agent")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("get home dir: %w", err)
+	}
+	agentHome := filepath.Join(home, ".membrane", "home")
+	if err := os.MkdirAll(agentHome, 0755); err != nil {
+		return nil, "", fmt.Errorf("create agent home dir: %w", err)
+	}
+	args = append(args, "-v", agentHome+":/home/agent")
 
 	// Write merged domains list to a temp file and mount it where
 	// firewall.sh expects it.

@@ -19,19 +19,18 @@ const (
 )
 
 // Reset removes selected membrane state. components is a string of
-// single-character codes: c=containers, i=image, v=volume, d=directory.
+// single-character codes: c=containers, i=image, d=directory.
 // Empty string means all components.
 func Reset(components string) error {
 	for _, r := range components {
-		if !strings.ContainsRune("civd", r) {
-			return fmt.Errorf("unknown reset component %q (valid: c=containers, i=image, v=volume, d=directory)", string(r))
+		if !strings.ContainsRune("cid", r) {
+			return fmt.Errorf("unknown reset component %q (valid: c=containers, i=image, d=directory)", string(r))
 		}
 	}
 
 	all := components == ""
 	doC := all || strings.ContainsRune(components, 'c')
 	doI := all || strings.ContainsRune(components, 'i')
-	doV := all || strings.ContainsRune(components, 'v')
 	doD := all || strings.ContainsRune(components, 'd')
 
 	fmt.Fprintf(os.Stderr, "This will remove:\n")
@@ -40,9 +39,6 @@ func Reset(components string) error {
 	}
 	if doI {
 		fmt.Fprintf(os.Stderr, "  i - the membrane Docker image\n")
-	}
-	if doV {
-		fmt.Fprintf(os.Stderr, "  v - the membrane-home volume\n")
 	}
 	if doD {
 		fmt.Fprintf(os.Stderr, "  d - ~/.membrane\n")
@@ -70,10 +66,6 @@ func Reset(components string) error {
 
 	if doI {
 		exec.Command("docker", "rmi", imageName).Run() // ignore error — may not exist
-	}
-
-	if doV {
-		exec.Command("docker", "volume", "rm", "membrane-home").Run() // ignore error — may not exist
 	}
 
 	if doD {

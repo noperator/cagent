@@ -11,7 +11,7 @@
 
 Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you real-time visibility into everything that your agent does.
 
-## Features
+### Features
 
 | | Membrane | Others |
 |---|---|---|
@@ -49,7 +49,7 @@ Usage: membrane [options] [-- command...]
 Options:
       --no-trace           disable Tracee eBPF sidecar
       --no-update          skip checking for updates
-      --reset[=civd]       remove membrane state and exit (c=containers, i=image, v=volume, d=directory)
+      --reset[=cid]        remove membrane state and exit (c=containers, i=image, d=directory)
       --trace-log string   path for trace log file (default: ~/.membrane/trace/<id>.jsonl.gz)
 ```
 
@@ -78,10 +78,10 @@ If you've made local edits and an update is available, membrane will back up `~/
 
 #### Reset
 
-`membrane --reset` will remove running containers, the Docker image, the `membrane-home` volume, and `~/.membrane/`. Workspace `.membrane.yaml` files are not affected. You can also reset individual components:
+`membrane --reset` will remove running containers, the Docker image, and `~/.membrane/`. Workspace `.membrane.yaml` files are not affected. You can also reset individual components:
 
 ```bash
-membrane --reset=civd  # all
+membrane --reset=cid   # all
 membrane --reset=ci    # containers and image only
 ```
 
@@ -278,10 +278,10 @@ This project is an experimental work in progress. There are likely more opportun
 - [ ] whitelist IPs
 - [ ] set custom DNS resolver
 - [ ] support Docker checkpoint
-- [ ] mount agent home dir as ~/.membrane/home on host
 
 <details><summary>Completed</summary>
 
+- [x] mount agent home dir as ~/.membrane/home on host
 - [x] monitor agent with eBPF
 - [x] specify domains at runtime
 - [x] git-aware read-only mounts

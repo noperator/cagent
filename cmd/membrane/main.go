@@ -16,8 +16,8 @@ func main() {
 	noTrace := flag.Bool("no-trace", false, "disable Tracee eBPF sidecar")
 	traceLog := flag.String("trace-log", "", "path for trace log file (default: ~/.membrane/trace/<id>.jsonl.gz)")
 	var reset stringFlag
-	flag.Var(&reset, "reset", "remove membrane state and exit (c=containers, i=image, v=volume, d=directory)")
-	flag.Lookup("reset").NoOptDefVal = "civd"
+	flag.Var(&reset, "reset", "remove membrane state and exit (c=containers, i=image, d=directory)")
+	flag.Lookup("reset").NoOptDefVal = "cid"
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "membrane: Agent in a cage.\n\n")
 		fmt.Fprintf(os.Stderr, "Locks down the network and filesystem so an agent is free to explore\n")
