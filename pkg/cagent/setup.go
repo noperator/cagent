@@ -197,14 +197,12 @@ func ensureImage(repoDir string) error {
 
 // buildImage runs docker build -t cagent <repoDir>.
 func buildImage(repoDir string) error {
-	fmt.Fprintf(os.Stderr, "Building cagent Docker image (this may take a few minutes)...\n")
 	cmd := exec.Command("docker", "build", "-t", imageName, repoDir)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Image built successfully.\n")
 	return nil
 }
 

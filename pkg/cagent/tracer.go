@@ -52,9 +52,11 @@ func NewTracer(agentContainerName, traceFile string) *Tracer {
 // or the 30-second timeout expires.
 func (t *Tracer) Start() error {
 	if err := exec.Command("docker", "image", "inspect", "aquasec/tracee:latest").Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "cagent: pulling tracee image...")
-		if out, err := exec.Command("docker", "pull", "aquasec/tracee:latest").CombinedOutput(); err != nil {
-			return fmt.Errorf("pull tracee image: %w\n%s", err, out)
+		cmd := exec.Command("docker", "pull", "aquasec/tracee:latest")
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("pull tracee image: %w", err)
 		}
 	}
 
@@ -127,13 +129,18 @@ func (t *Tracer) Start() error {
 		close(buffered)
 	}()
 
+	s := newSpinner()
+	s.Start("Setting up sandbox...")
+
 	select {
 	case err := <-readyCh:
+		s.Stop()
 		if err != nil {
 			_ = t.cmd.Process.Kill()
 			return err
 		}
 	case <-time.After(30 * time.Second):
+		s.Stop()
 		_ = t.cmd.Process.Kill()
 		return fmt.Errorf("tracee did not become ready within 30 seconds")
 	}
@@ -221,6 +228,9 @@ func (t *Tracer) streamEvents() {
 // NOTE: SIGKILL cannot be caught; the tracee container may need manual
 // cleanup via: docker stop tracee-<id>
 func (t *Tracer) Stop() {
+	s := newSpinner()
+	s.Start("Tearing down sandbox...")
+
 	_ = exec.Command("docker", "stop", "-t", "2", t.containerName).Run()
 	if t.containerID != "" {
 		<-t.done
@@ -230,6 +240,8 @@ func (t *Tracer) Stop() {
 			os.Remove(strings.TrimSuffix(t.traceFile, ".gz"))
 		}
 	}
+
+	s.Stop()
 }
 
 func gzipFile(dst string) error {
