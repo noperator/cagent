@@ -1,4 +1,4 @@
-package cagent
+package membrane
 
 import (
 	"encoding/json"
@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	repoURL   = "https://github.com/noperator/cagent.git"
-	apiURL    = "https://api.github.com/repos/noperator/cagent/commits/main"
-	imageName = "cagent"
+	repoURL   = "https://github.com/noperator/membrane.git"
+	apiURL    = "https://api.github.com/repos/noperator/membrane/commits/main"
+	imageName = "membrane"
 )
 
-// Reset removes selected cagent state. components is a string of
+// Reset removes selected membrane state. components is a string of
 // single-character codes: c=containers, i=image, v=volume, d=directory.
 // Empty string means all components.
 func Reset(components string) error {
@@ -36,18 +36,18 @@ func Reset(components string) error {
 
 	fmt.Fprintf(os.Stderr, "This will remove:\n")
 	if doC {
-		fmt.Fprintf(os.Stderr, "  c - all running cagent containers\n")
+		fmt.Fprintf(os.Stderr, "  c - all running membrane containers\n")
 	}
 	if doI {
-		fmt.Fprintf(os.Stderr, "  i - the cagent Docker image\n")
+		fmt.Fprintf(os.Stderr, "  i - the membrane Docker image\n")
 	}
 	if doV {
-		fmt.Fprintf(os.Stderr, "  v - the cagent-home volume\n")
+		fmt.Fprintf(os.Stderr, "  v - the membrane-home volume\n")
 	}
 	if doD {
-		fmt.Fprintf(os.Stderr, "  d - ~/.cagent\n")
+		fmt.Fprintf(os.Stderr, "  d - ~/.membrane\n")
 	}
-	fmt.Fprintf(os.Stderr, "\nWorkspace .cagent.yaml files are not affected.\n\nContinue? [y/N] ")
+	fmt.Fprintf(os.Stderr, "\nWorkspace .membrane.yaml files are not affected.\n\nContinue? [y/N] ")
 
 	var response string
 	fmt.Fscan(os.Stdin, &response)
@@ -73,7 +73,7 @@ func Reset(components string) error {
 	}
 
 	if doV {
-		exec.Command("docker", "volume", "rm", "cagent-home").Run() // ignore error — may not exist
+		exec.Command("docker", "volume", "rm", "membrane-home").Run() // ignore error — may not exist
 	}
 
 	if doD {
@@ -81,32 +81,32 @@ func Reset(components string) error {
 		if err != nil {
 			return fmt.Errorf("get home dir: %w", err)
 		}
-		if err := os.RemoveAll(filepath.Join(home, ".cagent")); err != nil {
-			return fmt.Errorf("remove ~/.cagent: %w", err)
+		if err := os.RemoveAll(filepath.Join(home, ".membrane")); err != nil {
+			return fmt.Errorf("remove ~/.membrane: %w", err)
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Reset complete. Run cagent again to start fresh.\n")
+	fmt.Fprintf(os.Stderr, "Reset complete. Run membrane again to start fresh.\n")
 	return nil
 }
 
-// cagentHome returns the path to ~/.cagent, creating it if necessary.
-func cagentHome() (string, error) {
+// membraneHome returns the path to ~/.membrane, creating it if necessary.
+func membraneHome() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".cagent")
+	dir := filepath.Join(home, ".membrane")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
 	return dir, nil
 }
 
-// ensureRepo clones the repo to ~/.cagent/src if not present.
-// Writes the current commit SHA to ~/.cagent/src/.commit after cloning.
+// ensureRepo clones the repo to ~/.membrane/src if not present.
+// Writes the current commit SHA to ~/.membrane/src/.commit after cloning.
 func ensureRepo() (string, error) {
-	home, err := cagentHome()
+	home, err := membraneHome()
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +117,7 @@ func ensureRepo() (string, error) {
 		return srcDir, nil // already cloned
 	}
 
-	fmt.Fprintf(os.Stderr, "Cloning cagent repo to %s...\n", srcDir)
+	fmt.Fprintf(os.Stderr, "Cloning membrane repo to %s...\n", srcDir)
 
 	cmd := exec.Command("git", "clone", repoURL, srcDir)
 	cmd.Stdout = os.Stderr
@@ -182,7 +182,7 @@ func update(repoDir string) error {
 	return writeCommit(repoDir)
 }
 
-// ensureImage checks if the cagent Docker image exists locally.
+// ensureImage checks if the membrane Docker image exists locally.
 // If not, builds it from repoDir.
 func ensureImage(repoDir string) error {
 	out, err := exec.Command("docker", "images", "-q", imageName).Output()
@@ -195,7 +195,7 @@ func ensureImage(repoDir string) error {
 	return buildImage(repoDir)
 }
 
-// buildImage runs docker build -t cagent <repoDir>.
+// buildImage runs docker build -t membrane <repoDir>.
 func buildImage(repoDir string) error {
 	cmd := exec.Command("docker", "build", "-t", imageName, repoDir)
 	cmd.Stdout = os.Stderr
@@ -206,14 +206,14 @@ func buildImage(repoDir string) error {
 	return nil
 }
 
-// writeDefaultConfig writes ~/.cagent/config.yaml if it doesn't already exist,
-// reading the template from ~/.cagent/src/config-default.yaml.
-func writeDefaultConfig(cagentHomeDir string) error {
-	dest := filepath.Join(cagentHomeDir, "config.yaml")
+// writeDefaultConfig writes ~/.membrane/config.yaml if it doesn't already exist,
+// reading the template from ~/.membrane/src/config-default.yaml.
+func writeDefaultConfig(membraneHomeDir string) error {
+	dest := filepath.Join(membraneHomeDir, "config.yaml")
 	if _, err := os.Stat(dest); err == nil {
 		return nil // already exists, never overwrite
 	}
-	src := filepath.Join(cagentHomeDir, "src", "config-default.yaml")
+	src := filepath.Join(membraneHomeDir, "src", "config-default.yaml")
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return fmt.Errorf("read default config: %w", err)

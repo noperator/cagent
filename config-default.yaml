@@ -7,10 +7,10 @@ ignore:
 readonly:
   - .git
   - .env
-  - .cagent.yaml
+  - .membrane.yaml
 
 # Domains the agent is allowed to reach.
-# Workspace .cagent.yaml can add more (additive, not replacing).
+# Workspace .membrane.yaml can add more (additive, not replacing).
 domains:
   # Anthropic
   - api.anthropic.com

@@ -37,7 +37,7 @@ fi
 # -------------------------------------------------------------------------
 
 # Start Docker daemon if running in Sysbox
-if [ "$CAGENT_DIND" = "1" ] && command -v dockerd >/dev/null 2>&1; then
+if [ "$MEMBRANE_DIND" = "1" ] && command -v dockerd >/dev/null 2>&1; then
     dockerd --add-runtime=crun=/usr/bin/crun --default-runtime=crun >/var/log/dockerd.log 2>&1 &
 
     for i in $(seq 1 30); do
@@ -55,12 +55,12 @@ fi
 # Update agent user to match workspace ownership
 WORKSPACE_UID=$(stat -c '%u' /workspace)
 WORKSPACE_GID=$(stat -c '%g' /workspace)
-usermod -u "$WORKSPACE_UID" cagent >/dev/null 2>&1 || true
-groupmod -g "$WORKSPACE_GID" cagent >/dev/null 2>&1 || true
+usermod -u "$WORKSPACE_UID" agent >/dev/null 2>&1 || true
+groupmod -g "$WORKSPACE_GID" agent >/dev/null 2>&1 || true
 
-if [ -n "$CAGENT_TITLE" ]; then
-    echo -ne "\e]2;${CAGENT_TITLE}\007" > /dev/tty 2>/dev/null || true
+if [ -n "$MEMBRANE_TITLE" ]; then
+    echo -ne "\e]2;${MEMBRANE_TITLE}\007" > /dev/tty 2>/dev/null || true
 fi
 
 cd /workspace
-exec gosu cagent "${@:-bash}"
+exec gosu agent "${@:-bash}"

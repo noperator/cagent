@@ -1,4 +1,4 @@
-module github.com/noperator/cagent
+module github.com/noperator/membrane
 
 go 1.23.2
 

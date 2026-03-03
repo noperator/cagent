@@ -11,7 +11,7 @@ Locks down the network and filesystem so an agent is free to explore the mounted
 
 ## Description
 
-cagent runs your AI agent inside a Docker container with two hard constraints:
+membrane runs your AI agent inside a Docker container with two hard constraints:
 
 - **Network:** An nftables firewall allows outbound traffic only to an explicit domain allowlist. Domains are resolved at startup and refreshed continuously. Everything else is dropped.
 - **Filesystem:** The workspace is mounted into the container, but sensitive files and directories can be hidden entirely (shadowed with an empty placeholder) or made read-only. This prevents the agent from reading secrets, corrupting `.git` history, or modifying its own configuration.
@@ -28,68 +28,68 @@ The agent runs as an unprivileged user. CAP_NET_ADMIN and CAP_NET_RAW are droppe
 ### Install
 
 ```bash
-go install github.com/noperator/cagent/cmd/cagent@latest
+go install github.com/noperator/membrane/cmd/membrane@latest
 ```
 
-On first run, cagent will clone the repo to `~/.cagent/src/`, build the Docker image, and write a default config to `~/.cagent/config.yaml`. Subsequent runs check for updates automatically.
+On first run, membrane will clone the repo to `~/.membrane/src/`, build the Docker image, and write a default config to `~/.membrane/config.yaml`. Subsequent runs check for updates automatically.
 
 ```bash
 cd /your/workspace
-cagent
+membrane
 ```
 
 ### Usage
 
 ```
-cagent -h
+membrane -h
 
-Usage: cagent [options] [-- command...]
+Usage: membrane [options] [-- command...]
 
 Options:
       --no-trace           disable Tracee eBPF sidecar
       --no-update          skip checking for updates
-      --reset[=civd]       remove cagent state and exit (c=containers, i=image, v=volume, d=directory)
-      --trace-log string   path for trace log file (default: ~/.cagent/trace/<id>.jsonl.gz)
+      --reset[=civd]       remove membrane state and exit (c=containers, i=image, v=volume, d=directory)
+      --trace-log string   path for trace log file (default: ~/.membrane/trace/<id>.jsonl.gz)
 ```
 
-Optionally pass a specific command to be executed, using `--` to separate cagent options from the command to run inside the container.
+Optionally pass a specific command to be executed, using `--` to separate membrane options from the command to run inside the container.
 
 ```bash
 # Drop into a shell
-cagent
+membrane
 
 # Run a specific command
-cagent -- claude -p "just say hello"
-cagent -- bash -c "echo hello"
+membrane -- claude -p "just say hello"
+membrane -- bash -c "echo hello"
 ```
 
 <details><summary>Advanced usage</summary>
 
 #### Modify the image
 
-If you want to customize the Dockerfile, firewall rules, or entrypoint, edit the files in `~/.cagent/src/` and rebuild:
+If you want to customize the Dockerfile, firewall rules, or entrypoint, edit the files in `~/.membrane/src/` and rebuild:
 
 ```bash
-docker build -t cagent ~/.cagent/src/
+docker build -t membrane ~/.membrane/src/
 ```
 
-If you've made local edits and an update is available, cagent will back up `~/.cagent/src/` to a timestamped directory before pulling.
+If you've made local edits and an update is available, membrane will back up `~/.membrane/src/` to a timestamped directory before pulling.
 
 #### Reset
 
-`cagent --reset` will remove running containers, the Docker image, the `cagent-home` volume, and `~/.cagent/`. Workspace `.cagent.yaml` files are not affected. You can also reset individual components:
+`membrane --reset` will remove running containers, the Docker image, the `membrane-home` volume, and `~/.membrane/`. Workspace `.membrane.yaml` files are not affected. You can also reset individual components:
 
 ```bash
-cagent --reset=civd  # all
-cagent --reset=ci    # containers and image only
+membrane --reset=civd  # all
+membrane --reset=ci    # containers and image only
 ```
 
 ### Trace execution
 
-By default, cagent records a eBPF trace of everything the agent does. In this example, I just tell Claude to go download the homepage of my blog. 
+By default, membrane records a eBPF trace of everything the agent does. In this example, I just tell Claude to go download the homepage of my blog.
 
 ```bash
-cagent --trace-log=blog.jsonl -- \
+membrane --trace-log=blog.jsonl -- \
     claude --dangerously-skip-permissions \
     -p 'Download the homepage of my blog noperator.dev and save it to blog.html.'
 
@@ -153,10 +153,10 @@ exec  rg: /usr/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/arm64-l
 file  rg: 147456 /workspace
 file  rg: 147456 /workspace/pkg
 file  rg: 147456 /workspace/test
-file  rg: 147456 /workspace/pkg/cagent
+file  rg: 147456 /workspace/pkg/membrane
 file  rg: 147456 /workspace/img
 file  rg: 147456 /workspace/cmd
-file  rg: 147456 /workspace/cmd/cagent
+file  rg: 147456 /workspace/cmd/membrane
 exec  sh: /bin/sh -c ps aux | grep -E "code|cursor|windsurf|idea|pycharm|webstorm|phpstorm|rubymine|clion|goland|rider|datagrip|dataspell|aqua|gateway|fleet|android-studio" | grep -v grep
 exec  grep: grep -E code|cursor|windsurf|idea|pycharm|webstorm|phpstorm|rubymine|clion|goland|rider|datagrip|dataspell|aqua|gateway|fleet|android-studio
 exec  ps: ps aux
@@ -172,7 +172,7 @@ exec  node: node /usr/bin/npm root -g
 exec  uname: uname -sr
 exec  sh: /bin/sh -c which zsh
 exec  sh: /bin/sh -c which bash
-exec  bash: /bin/bash -c -l SNAPSHOT_FILE=/home/cagent/.claude/shell-snapshots/snapshot-bash-1772485556640-5hbuui.sh
+exec  bash: /bin/bash -c -l SNAPSHOT_FILE=/home/agent/.claude/shell-snapshots/snapshot-bash-1772485556640-5hbuui.sh
 exec  locale-check: /usr/bin/locale-check C.UTF-8
 exec  cut: cut -d  -f3
 exec  grep: grep -vE ^_[^_]
@@ -183,7 +183,7 @@ exec  grep: grep on
 exec  sed: sed s/^alias //g
 exec  sed: sed s/^/alias -- /
 exec  head: head -n 1000
-exec  bash: /bin/bash -c source /home/cagent/.claude/shell-snapshots/snapshot-bash-1772485556640-5hbuui.sh && shopt -u extglob 2>/dev/null || true && eval 'curl -sL -o /workspace/blog.html https://noperator.dev' \< /dev/null && pwd -P >| /tmp/claude-cca8-cwd
+exec  bash: /bin/bash -c source /home/agent/.claude/shell-snapshots/snapshot-bash-1772485556640-5hbuui.sh && shopt -u extglob 2>/dev/null || true && eval 'curl -sL -o /workspace/blog.html https://noperator.dev' \< /dev/null && pwd -P >| /tmp/claude-cca8-cwd
 exec  curl: curl -sL -o /workspace/blog.html https://noperator.dev
 conn  curl: AF_INET 8.8.8.8:53
 dns   curl → noperator.dev A
@@ -197,7 +197,7 @@ conn  node: AF_INET 8.8.8.8:53
 dns   node → api.anthropic.com A
 conn  claude: AF_INET 160.79.104.10:443
 file  node: 131072 /workspace/blog.html
-exec  bash: /bin/bash -c source /home/cagent/.claude/shell-snapshots/snapshot-bash-1772485556640-5hbuui.sh && shopt -u extglob 2>/dev/null || true && eval 'wc -c /workspace/blog.html && head -5 /workspace/blog.html' \< /dev/null && pwd -P >| /tmp/claude-5f6c-cwd
+exec  bash: /bin/bash -c source /home/agent/.claude/shell-snapshots/snapshot-bash-1772485556640-5hbuui.sh && shopt -u extglob 2>/dev/null || true && eval 'wc -c /workspace/blog.html && head -5 /workspace/blog.html' \< /dev/null && pwd -P >| /tmp/claude-5f6c-cwd
 exec  wc: wc -c /workspace/blog.html
 file  wc: 131072 /workspace/blog.html
 exec  head: head -5 /workspace/blog.html
@@ -219,8 +219,8 @@ conn  claude: AF_INET 34.149.66.137:443
 
 Configuration is YAML and works at two levels:
 
-- **Global** (`~/.cagent/config.yaml`): Applies to every workspace. Written from the default template on first run. Edit this to set your baseline domains, ignore patterns, and readonly patterns.
-- **Workspace** (`.cagent.yaml` in your project root): Applies to the current workspace only. Lists in the workspace config are appended to the global config, not replaced.
+- **Global** (`~/.membrane/config.yaml`): Applies to every workspace. Written from the default template on first run. Edit this to set your baseline domains, ignore patterns, and readonly patterns.
+- **Workspace** (`.membrane.yaml` in your project root): Applies to the current workspace only. Lists in the workspace config are appended to the global config, not replaced.
 
 ```yaml
 # Patterns matched against filenames or relative paths. Matching files and
@@ -258,7 +258,7 @@ This project is an experimental work in progress. There are likely more opportun
 
 - **Network not working for a domain that should be allowed:** The firewall resolves domains to IPs at startup. If a CDN rotates IPs, the connection may fail until the next refresh (every 60s). Check `/var/log/firewall-updater.log` inside the container for refresh status.
 
-- **Docker-in-Docker not working:** Sysbox must be installed on the host. cagent detects it automatically; if it's not present, Docker-in-Docker is silently disabled.
+- **Docker-in-Docker not working:** Sysbox must be installed on the host. membrane detects it automatically; if it's not present, Docker-in-Docker is silently disabled.
 
 ## Back matter
 
@@ -277,6 +277,7 @@ This project is an experimental work in progress. There are likely more opportun
 - [ ] whitelist IPs
 - [ ] set custom DNS resolver
 - [ ] support Docker checkpoint
+- [ ] mount agent home dir as ~/.membrane/home on host
 
 <details><summary>Completed</summary>
 
