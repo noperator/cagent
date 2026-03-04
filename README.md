@@ -51,6 +51,14 @@ Options:
       --no-update          skip checking for updates
       --reset[=cid]        remove membrane state and exit (c=containers, i=image, d=directory)
       --trace-log string   path for trace log file (default: ~/.membrane/trace/<id>.jsonl.gz)
+
+Config:
+  -a, --arg stringArray        extra docker run argument (repeatable)
+  -c, --cidr stringArray       allowed IP or CIDR range (repeatable)
+  -n, --hostname stringArray   allowed hostname (repeatable)
+  -i, --ignore stringArray     ignore pattern (repeatable)
+  -r, --readonly stringArray   readonly pattern (repeatable)
+      --resolver string        DNS resolver (overrides config file)
 ```
 
 Optionally pass a specific command to be executed, using `--` to separate membrane options from the command to run inside the container.
@@ -224,38 +232,54 @@ Configuration is YAML and works at two levels:
 - **Workspace** (`.membrane.yaml` in your project root): Applies to the current workspace only. Lists in the workspace config are appended to the global config, not replaced.
 
 ```yaml
-# resolver is the DNS resolver used by both the firewall and the
+# `resolver` is the DNS resolver used by both the firewall and the
 # container. Defaults to 8.8.8.8 if not set.
-resolver:
+resolver: 1.1.1.1
 
-# Patterns matched against filenames or relative paths. Matching files and
-# directories are shadowed with an empty placeholder inside the container. The
-# agent can see that they exist but cannot read their contents.
+# `ignore` lists patterns matched against filenames or relative paths.
+# Matching files and directories are shadowed with an empty placeholder
+# inside the container — the agent can see they exist but cannot read
+# their contents.
 ignore:
   - secrets/
   - "*.pem"
 
-# Patterns mounted into the container as read-only. Use this for things like
-# `.git` (so the agent can read history but can't rewrite it) or `.env` files
-# (visible but not writable).
+# `readonly` lists patterns mounted into the container as read-only. Use
+# this for things like .git (so the agent can read history but not
+# rewrite it) or credential files that should be visible but not
+# writable.
 readonly:
   - config/
 
-# Hostnames the agent is allowed to reach. The firewall resolves these to IPs at
-# startup and refreshes every 60s. Anything not on the list is dropped.
+# `hostnames` lists hostnames the agent is allowed to reach. The firewall
+# resolves these to IPs at startup and refreshes continuously. Anything
+# not listed is dropped.
 hostnames:
   - internal.mycompany.com
 
-# cidrs lists IP addresses or CIDR ranges that are added directly to the
-# firewall allowlist without DNS resolution. Bare IPs are treated as /32.
+# `cidrs` lists IP addresses or CIDR ranges added directly to the firewall
+# allowlist without DNS resolution. Bare IPs are treated as /32.
 cidrs:
+  - 192.168.2.1
+  - 192.168.3.0/24
 
-# Raw arguments appended to `docker run`.
+# `args` lists raw arguments appended to the `docker run` command that
+# launches the agent container. Use this to pass environment variables,
+# additional mounts, port mappings, or anything else accepted by
+# `docker run`. Environment variables are expanded ($VAR, ${VAR})
+# anywhere in a value, including mid-string (e.g. MY_PATH=$HOME/mydir).
+# Shell command substitution ($(...)) is not supported — set secrets in
+# your shell environment first and reference them here. Values are
+# passed directly to `docker run` without shell interpretation. Do not
+# add shell-style quoting around values — quotes are treated as literal
+# characters. Each flag and its argument must be separate list items.
 args:
   - -e
   - MY_API_KEY=abc123
+  - -e
+  - "MY_VALUE=my value with space"
   - -v
-  - /home/user/.aws:/home/agent/.aws:ro
+  - $HOME/.aws:/home/agent/.aws:ro
   - -e
   - AWS_PROFILE=myprofile
 ```
@@ -282,16 +306,16 @@ This project is an experimental work in progress. There are likely more opportun
 
 ### To-do
 
-- [ ] pass via config via CLI (in addition to file)
 - [ ] allow reading from host stdin (to be used in pipeline)
 - [ ] support Docker-in-Docker on macOS
-- [ ] whitelist IPs
-- [ ] set custom DNS resolver
 - [ ] support Docker checkpoint
 - [ ] whitelist HTTPS paths/endpoints
 
 <details><summary>Completed</summary>
 
+- [x] pass via config via CLI (in addition to file)
+- [x] whitelist IPs
+- [x] set custom DNS resolver
 - [x] mount agent home dir as ~/.membrane/home on host
 - [x] monitor agent with eBPF
 - [x] specify hostnames at runtime
