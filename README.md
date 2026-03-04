@@ -13,9 +13,9 @@ Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you
 
 ### Features
 
-- **Network egress filtering**: Approved hostnames are whitelisted, DNS-resolved at startup, and refreshed continuously.<br><sub>&emsp;*Most tools don't filter the network at all, or require manual iptables rules that are easy to misconfigure.*</sub>
+- **Network egress filtering**: Hostnames are whitelisted, DNS-resolved at startup, and refreshed continuously.<br><sub>&emsp;*Most tools don't filter the network at all, or require manual iptables rules that are easy to misconfigure.*</sub>
 - **Filesystem isolation**: Sensitive files can be masked and made invisible to the agent, or mounted read-only.<br><sub>&emsp;*Most tools offer no granular filesystem controls on top of bind mounts.*</sub>
-- **Observability**: eBPF traces everything that crosses the boundary—processes, DNS queries, file opens, network connections.<br><sub>&emsp;*Most tools offer no runtime visibility into what the agent is actually doing.*</sub>
+- **Observability**: eBPF traces all agent filesystem, network, and process activity at the kernel level.<br><sub>&emsp;*Most tools offer no runtime visibility into what the agent is actually doing.*</sub>
 - **Nested containers**: Docker-in-Docker via unprivileged Sysbox containers.<br><sub>&emsp;*Most tools require `--privileged` (unsafe) or a separate hypervisor.*</sub>
 - **Agent-agnostic**: Wraps any process or command, not coupled to a specific agent.<br><sub>&emsp;*Most tools are tightly coupled to a specific agent (Claude Code, Codex, etc.).*</sub>
 - **Cross-platform**: Linux and macOS via Docker; strong enforcement on both platforms.<br><sub>&emsp;*Most tools rely on OS-specific primitives: Landlock and bubblewrap (Linux), Seatbelt and Apple Containers (macOS).*</sub>
