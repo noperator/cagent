@@ -21,7 +21,6 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
 }
 cp /membrane-ca/ca.crt /usr/local/share/ca-certificates/membrane-ca.crt
 update-ca-certificates >/dev/null 2>&1
-echo "CA cert installed."
 
 # Start Docker daemon if running in Sysbox
 if [ "$MEMBRANE_DIND" = "1" ] && command -v dockerd >/dev/null 2>&1; then

@@ -17,10 +17,9 @@ func main() {
 	traceLog := flag.String("trace-log", "", "path for trace log file (default: ~/.membrane/trace/<id>.jsonl.gz)")
 	ignore := flag.StringArrayP("ignore", "i", []string{}, "ignore pattern (repeatable)")
 	readonly := flag.StringArrayP("readonly", "r", []string{}, "readonly pattern (repeatable)")
-	hostname := flag.StringArrayP("hostname", "n", []string{}, "allowed hostname (repeatable)")
-	cidr := flag.StringArrayP("cidr", "c", []string{}, "allowed IP or CIDR range (repeatable)")
-	arg := flag.StringArrayP("arg", "a", []string{}, "extra docker run argument (repeatable)")
-	resolver := flag.String("resolver", "", "DNS resolver (overrides config file)")
+	allow := flag.StringArrayP("allow", "a", []string{}, "allow rule: hostname, IP, CIDR, or URL (repeatable)")
+	arg := flag.StringArray("arg", []string{}, "extra docker run argument (repeatable)")
+	dnsResolver := flag.String("dns-resolver", "", "DNS resolver (overrides config file)")
 	var reset stringFlag
 	flag.Var(&reset, "reset", "remove membrane state and exit (c=containers, i=image, d=directory)")
 	flag.Lookup("reset").NoOptDefVal = "cid"
@@ -29,7 +28,7 @@ func main() {
 		optionFlags.AddFlag(flag.Lookup(name))
 	}
 	configFlags := flag.NewFlagSet("", flag.ContinueOnError)
-	for _, name := range []string{"ignore", "readonly", "hostname", "cidr", "arg", "resolver"} {
+	for _, name := range []string{"ignore", "readonly", "allow", "arg", "dns-resolver"} {
 		configFlags.AddFlag(flag.Lookup(name))
 	}
 	flag.Usage = func() {
@@ -63,12 +62,11 @@ func main() {
 	}
 
 	cli := membrane.CLIOverrides{
-		Ignore:    *ignore,
-		Readonly:  *readonly,
-		Hostnames: *hostname,
-		Cidrs:     *cidr,
-		Args:      *arg,
-		Resolver:  *resolver,
+		Ignore:      *ignore,
+		Readonly:    *readonly,
+		Allow:       *allow,
+		Args:        *arg,
+		DNSResolver: *dnsResolver,
 	}
 
 	if err := membrane.Run(*noUpdate, !*noTrace, *traceLog, flag.Args(), cli); err != nil {

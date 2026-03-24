@@ -1,10 +1,9 @@
 # Workspace .membrane.yaml entries are appended to the global list, not
-# replaced. This applies to all list keys: ignore, readonly, hostnames,
-# cidrs, and args.
+# replaced. This applies to all list keys: ignore, readonly, allow, and args.
 
-# `resolver` is the DNS resolver used by both the firewall and the
-# container. Defaults to 8.8.8.8 if not set.
-resolver:
+# `dns_resolver` is the upstream DNS resolver used by the handler's dns-proxy.
+# Defaults to 1.1.1.1 if not set.
+dns_resolver:
 
 # `ignore` lists patterns matched against filenames or relative paths.
 # Matching files and directories are shadowed with an empty placeholder
@@ -23,10 +22,21 @@ readonly:
   - .env
   - .membrane.yaml
 
-# `hostnames` lists hostnames the agent is allowed to reach. The firewall
-# resolves these to IPs at startup and refreshes continuously. Anything
-# not listed is dropped.
-hostnames:
+# `allow` lists what the agent is allowed to reach. Each entry is
+# auto-detected from its value:
+#   IP address  → /32 CIDR, any port
+#   CIDR        → CIDR range, any port
+#   hostname    → DNS-resolved, any port
+#   URL         → DNS-resolved, port from URL, L7 enforcement via mitmproxy
+#
+# Object form is also supported:
+#   - dest: hostname
+#     ports: [80, 443]
+#   - dest: https://api.example.com
+#     http:
+#       - methods: [POST]
+#         paths: [/v1/messages]
+allow:
   # Anthropic
   - api.anthropic.com
   - sentry.io
@@ -108,10 +118,6 @@ hostnames:
   - bedrock.us-west-1.amazonaws.com
   - bedrock-runtime.us-west-2.amazonaws.com
   - bedrock.us-west-2.amazonaws.com
-
-# `cidrs` lists IP addresses or CIDR ranges added directly to the firewall
-# allowlist without DNS resolution. Bare IPs are treated as /32.
-cidrs:
 
 # `args` lists raw arguments appended to the `docker run` command that
 # launches the agent container. Use this to pass environment variables,

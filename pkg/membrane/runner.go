@@ -3,6 +3,7 @@ package membrane
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,29 @@ import (
 	"github.com/creack/pty/v2"
 	"golang.org/x/term"
 )
+
+// writeAllowFile serialises allow rules to a temp file and returns its path.
+// The caller is responsible for removing the file when done.
+func writeAllowFile(allow []AllowRule) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
+	dir := filepath.Join(home, ".membrane", "tmp")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("create tmp dir: %w", err)
+	}
+	f, err := os.CreateTemp(dir, "membrane-allow-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create allow file: %w", err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(allow); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write allow file: %w", err)
+	}
+	return f.Name(), nil
+}
 
 func hasSysbox() bool {
 	if runtime.GOOS != "linux" {
@@ -81,9 +105,14 @@ func startSession(s sessionNames, cfg *config) (func(), string, error) {
 			s.internalNetwork, out, err)
 	}
 
-	hostnamesFile, err := writeHostnames(cfg.Hostnames)
+	allowFile, err := writeAllowFile(cfg.Allow)
 	if err != nil {
-		return cleanup, "", err
+		return cleanup, "", fmt.Errorf("write allow file: %w", err)
+	}
+	origCleanup := cleanup
+	cleanup = func() {
+		origCleanup()
+		os.Remove(allowFile)
 	}
 
 	handlerArgs := []string{
@@ -92,15 +121,11 @@ func startSession(s sessionNames, cfg *config) (func(), string, error) {
 		"--network", s.externalNetwork,
 		"--cap-add=NET_ADMIN",
 		"--sysctl", "net.ipv4.ip_forward=1",
-		"-v", hostnamesFile + ":/etc/membrane/hostnames.txt:ro",
 		"-v", s.caVolume + ":/membrane-ca",
-		"-e", "MEMBRANE_DNS_RESOLVER=" + cfg.Resolver,
+		"-v", allowFile + ":/etc/membrane/allow.json:ro",
+		"-e", "MEMBRANE_DNS_RESOLVER=" + cfg.dnsResolver(),
+		handlerImageName,
 	}
-	if len(cfg.Cidrs) > 0 {
-		handlerArgs = append(handlerArgs, "-e",
-			"MEMBRANE_CIDRS="+strings.Join(cfg.Cidrs, ","))
-	}
-	handlerArgs = append(handlerArgs, handlerImageName)
 
 	if out, err := exec.Command("docker", handlerArgs...).CombinedOutput(); err != nil {
 		return cleanup, "", fmt.Errorf("start handler: %s: %w", out, err)
@@ -206,32 +231,6 @@ func buildAgentArgs(workspaceDir string, m *mounts, cfg *config, passthrough []s
 	args = append(args, passthrough...)
 
 	return args, nil
-}
-
-// writeHostnames writes the hostnames list to a temp file and returns its path.
-// The file is not cleaned up — syscall.Exec replaces this process and the
-// OS handles cleanup.
-func writeHostnames(hostnames []string) (string, error) {
-	if len(hostnames) == 0 {
-		return "", fmt.Errorf("hostnames list is empty — add hostnames to ~/.membrane/config.yaml")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home dir: %w", err)
-	}
-	tmpBase := filepath.Join(home, ".membrane", "tmp")
-	if err := os.MkdirAll(tmpBase, 0755); err != nil {
-		return "", fmt.Errorf("create tmp dir: %w", err)
-	}
-	f, err := os.CreateTemp(tmpBase, "membrane-hostnames-")
-	if err != nil {
-		return "", fmt.Errorf("create hostnames temp file: %w", err)
-	}
-	defer f.Close()
-	for _, d := range hostnames {
-		fmt.Fprintln(f, d)
-	}
-	return f.Name(), nil
 }
 
 // ExitError carries the exit code from the docker run child process.

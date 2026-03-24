@@ -15,12 +15,11 @@ import (
 // CLIOverrides holds config values passed via CLI flags. List fields are
 // appended to the merged file config; scalar fields replace it.
 type CLIOverrides struct {
-	Ignore    []string
-	Readonly  []string
-	Hostnames []string
-	Cidrs     []string
-	Args      []string
-	Resolver  string
+	Ignore      []string
+	Readonly    []string
+	Allow       []string // raw strings, parsed via ParseAllowEntry
+	Args        []string
+	DNSResolver string
 }
 
 // Run is the main entry point called from cmd/membrane/main.go.
@@ -70,11 +69,16 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 
 	cfg.Ignore = append(cfg.Ignore, cli.Ignore...)
 	cfg.Readonly = append(cfg.Readonly, cli.Readonly...)
-	cfg.Hostnames = append(cfg.Hostnames, cli.Hostnames...)
-	cfg.Cidrs = append(cfg.Cidrs, cli.Cidrs...)
 	cfg.Args = append(cfg.Args, cli.Args...)
-	if cli.Resolver != "" {
-		cfg.Resolver = cli.Resolver
+	for _, entry := range cli.Allow {
+		rule, err := ParseAllowEntry(entry)
+		if err != nil {
+			return fmt.Errorf("invalid --allow value %q: %w", entry, err)
+		}
+		cfg.Allow = append(cfg.Allow, rule)
+	}
+	if cli.DNSResolver != "" {
+		cfg.DNSResolver = cli.DNSResolver
 	}
 
 	m, err := scan(workspaceDir, cfg)

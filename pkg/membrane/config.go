@@ -2,19 +2,191 @@ package membrane
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 type config struct {
-	Resolver  string   `yaml:"resolver"`
-	Ignore    []string `yaml:"ignore"`
-	Readonly  []string `yaml:"readonly"`
-	Args      []string `yaml:"args"`
-	Hostnames []string `yaml:"hostnames"`
-	Cidrs     []string `yaml:"cidrs"`
+	DNSResolver string      `yaml:"dns_resolver"`
+	Ignore      []string    `yaml:"ignore"`
+	Readonly    []string    `yaml:"readonly"`
+	Args        []string    `yaml:"args"`
+	Allow       []AllowRule `yaml:"allow"`
+}
+
+func (c *config) dnsResolver() string {
+	if c.DNSResolver != "" {
+		return c.DNSResolver
+	}
+	return "1.1.1.1"
+}
+
+// AllowRule represents a single entry in the allow list.
+// Type is one of "cidr", "host", or "url".
+type AllowRule struct {
+	Type    string     `json:"type"`
+	CIDR    string     `json:"cidr,omitempty"`
+	Host    string     `json:"host,omitempty"`
+	Ports   []int      `json:"ports,omitempty"` // nil = any port
+	Scheme  string     `json:"scheme,omitempty"`
+	Path    string     `json:"path,omitempty"`
+	IsRegex bool       `json:"is_regex,omitempty"`
+	HTTP    []HTTPRule `json:"http,omitempty"`
+}
+
+type HTTPRule struct {
+	Methods []string   `json:"methods,omitempty"`
+	Paths   []PathRule `json:"paths,omitempty"`
+}
+
+type PathRule struct {
+	Path    string `json:"path"`
+	IsRegex bool   `json:"is_regex,omitempty"`
+}
+
+func (r *AllowRule) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		return r.parseAuto(value.Value)
+	case yaml.MappingNode:
+		return r.parseMappingNode(value)
+	default:
+		return fmt.Errorf("allow entry must be a string or mapping")
+	}
+}
+
+func (r *AllowRule) parseAuto(s string) error {
+	// 1. IP address → CIDR /32
+	if net.ParseIP(s) != nil {
+		r.Type = "cidr"
+		r.CIDR = s + "/32"
+		return nil
+	}
+	// 2. CIDR
+	if _, _, err := net.ParseCIDR(s); err == nil {
+		r.Type = "cidr"
+		r.CIDR = s
+		return nil
+	}
+	// 3. URL
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil {
+			return fmt.Errorf("invalid URL %q: %w", s, err)
+		}
+		r.Type = "url"
+		r.Scheme = u.Scheme
+		r.Host = u.Hostname()
+		r.Path = u.Path
+		if portStr := u.Port(); portStr != "" {
+			p, err := strconv.Atoi(portStr)
+			if err != nil {
+				return fmt.Errorf("invalid port in URL %q: %w", s, err)
+			}
+			r.Ports = []int{p}
+		} else if u.Scheme == "https" {
+			r.Ports = []int{443}
+		} else if u.Scheme == "http" {
+			r.Ports = []int{80}
+		}
+		return nil
+	}
+	// 4. Hostname (possibly with inline port)
+	r.Type = "host"
+	if host, portStr, err := net.SplitHostPort(s); err == nil {
+		r.Host = host
+		p, err := strconv.Atoi(portStr)
+		if err != nil {
+			return fmt.Errorf("invalid port in %q: %w", s, err)
+		}
+		r.Ports = []int{p}
+	} else {
+		r.Host = s
+	}
+	return nil
+}
+
+func (r *AllowRule) parseMappingNode(value *yaml.Node) error {
+	var destStr string
+	var portsNode *yaml.Node
+	var httpNode *yaml.Node
+
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key := value.Content[i].Value
+		val := value.Content[i+1]
+		switch key {
+		case "dest":
+			destStr = val.Value
+		case "ports":
+			portsNode = val
+		case "http":
+			httpNode = val
+		}
+	}
+
+	if destStr == "" {
+		return fmt.Errorf("allow mapping entry missing 'dest' key")
+	}
+	if err := r.parseAuto(destStr); err != nil {
+		return err
+	}
+
+	if portsNode != nil {
+		for _, n := range portsNode.Content {
+			p, err := strconv.Atoi(n.Value)
+			if err != nil {
+				return fmt.Errorf("invalid port %q: %w", n.Value, err)
+			}
+			r.Ports = appendUniqueInt(r.Ports, p)
+		}
+	}
+
+	if httpNode != nil {
+		for _, ruleNode := range httpNode.Content {
+			var hr HTTPRule
+			for i := 0; i+1 < len(ruleNode.Content); i += 2 {
+				key := ruleNode.Content[i].Value
+				val := ruleNode.Content[i+1]
+				switch key {
+				case "methods":
+					for _, n := range val.Content {
+						hr.Methods = append(hr.Methods, n.Value)
+					}
+				case "paths":
+					for _, n := range val.Content {
+						hr.Paths = append(hr.Paths, PathRule{
+							Path:    n.Value,
+							IsRegex: n.Tag == "!regex",
+						})
+					}
+				}
+			}
+			r.HTTP = append(r.HTTP, hr)
+		}
+	}
+
+	return nil
+}
+
+func appendUniqueInt(s []int, v int) []int {
+	for _, x := range s {
+		if x == v {
+			return s
+		}
+	}
+	return append(s, v)
+}
+
+// ParseAllowEntry parses a raw CLI --allow string into an AllowRule.
+func ParseAllowEntry(raw string) (AllowRule, error) {
+	var r AllowRule
+	return r, r.parseAuto(raw)
 }
 
 // loadConfig loads and merges local (~/.membrane/config.yaml) and workspace
@@ -34,7 +206,6 @@ func loadConfig(workspaceDir string) (*config, error) {
 	localMissing := os.IsNotExist(localErr)
 	workspaceMissing := os.IsNotExist(workspaceErr)
 
-	// Return actual errors (not "file not found").
 	if localErr != nil && !localMissing {
 		return nil, fmt.Errorf("load local config: %w", localErr)
 	}
@@ -42,7 +213,6 @@ func loadConfig(workspaceDir string) (*config, error) {
 		return nil, fmt.Errorf("load workspace config: %w", workspaceErr)
 	}
 
-	// Start from local (or empty if missing), append workspace.
 	base := config{}
 	if !localMissing {
 		base = *localCfg
@@ -51,12 +221,7 @@ func loadConfig(workspaceDir string) (*config, error) {
 		base.Ignore = append(base.Ignore, workspace.Ignore...)
 		base.Readonly = append(base.Readonly, workspace.Readonly...)
 		base.Args = append(base.Args, workspace.Args...)
-		base.Hostnames = append(base.Hostnames, workspace.Hostnames...)
-		base.Cidrs = append(base.Cidrs, workspace.Cidrs...)
-	}
-
-	if base.Resolver == "" {
-		base.Resolver = "8.8.8.8"
+		base.Allow = append(base.Allow, workspace.Allow...)
 	}
 
 	expandArgs(base.Args)

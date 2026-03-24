@@ -19,35 +19,30 @@ done
 echo "Interfaces: external=$DEFAULT_GW_IF internal=$INTERNAL_IF"
 
 # Enable IP forwarding
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
 
-# Resolve allowed hostnames in parallel
-HOSTNAMES_FILE="${MEMBRANE_HOSTNAMES_FILE:-/etc/membrane/hostnames.txt}"
 DNS_RESOLVER="${MEMBRANE_DNS_RESOLVER:-1.1.1.1}"
+ALLOW_FILE="${MEMBRANE_ALLOW_FILE:-/etc/membrane/allow.json}"
 
-IP_LIST=$(mktemp)
+# Extract CIDRs from allow file for initial nftables population
+# Hostnames are resolved dynamically by dns-proxy at query time
+CIDRS=$(python3 -c "
+import json, sys
+with open('$ALLOW_FILE') as f:
+    rules = json.load(f)
+for r in rules:
+    if r.get('type') == 'cidr' and r.get('cidr'):
+        print(r['cidr'])
+" 2>/dev/null)
 
-if [ -f "$HOSTNAMES_FILE" ]; then
-    grep -vE '^#|^\s*$' "$HOSTNAMES_FILE" | xargs -P 20 -I {} sh -c \
-        'dig +short "{}" A @'"$DNS_RESOLVER"' 2>/dev/null' \
-        | grep -E '^[1-9][0-9]*\.[0-9]+\.[0-9]+\.[0-9]+$' \
-        | sed 's/$/\/32/' >> "$IP_LIST"
-fi
+ALL_IPS=$(echo "$CIDRS" | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//' || true)
 
-# Add user-specified CIDRs
-if [ -n "${MEMBRANE_CIDRS:-}" ]; then
-    echo "$MEMBRANE_CIDRS" | tr ',' '\n' | while read -r cidr; do
-        [[ "$cidr" == */* ]] || cidr="${cidr}/32"
-        echo "$cidr"
-    done >> "$IP_LIST"
-fi
-
-ALL_IPS=$(sort -u "$IP_LIST" | tr '\n' ',' | sed 's/,$//')
-rm -f "$IP_LIST"
-
-[ -n "$ALL_IPS" ] || { echo "ERROR: no IPs resolved — check hostnames file"; exit 1; }
+[ -n "$ALL_IPS" ] || ALL_IPS="127.0.0.2/32"
 
 MITMPROXY_PORT=8080
+
+# Build elements clause conditionally (nftables requires non-empty elements list)
+ANY_PORT_ELEMENTS="elements = { $ALL_IPS }"
 
 # Set up nftables
 nft -f - <<EOF
@@ -55,15 +50,19 @@ table ip membrane
 delete table ip membrane
 table ip membrane {
     set allowed {
+        type ipv4_addr . inet_service
+    }
+
+    set allowed-any-port {
         type ipv4_addr
         flags interval
-        elements = { $ALL_IPS }
+        $ANY_PORT_ELEMENTS
     }
 
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-        iifname "$INTERNAL_IF" ip daddr @allowed tcp dport 80 redirect to :$MITMPROXY_PORT
-        iifname "$INTERNAL_IF" ip daddr @allowed tcp dport 443 redirect to :$MITMPROXY_PORT
+        iifname "$INTERNAL_IF" ip daddr @allowed-any-port tcp dport { 80, 443 } redirect to :$MITMPROXY_PORT
+        iifname "$INTERNAL_IF" ip daddr . tcp dport @allowed redirect to :$MITMPROXY_PORT
     }
 
     chain postrouting {
@@ -81,19 +80,18 @@ table ip membrane {
         ct state established,related accept
         tcp flags syn tcp option maxseg size set rt mtu
         iifname "$INTERNAL_IF" udp dport 53 accept
-        iifname "$INTERNAL_IF" ip daddr @allowed accept
+        iifname "$INTERNAL_IF" ip daddr @allowed-any-port accept
+        iifname "$INTERNAL_IF" ip daddr . tcp dport @allowed accept
         iifname "$INTERNAL_IF" log prefix "[membrane BLOCKED] " limit rate 5/second
         iifname "$INTERNAL_IF" reject with icmp admin-prohibited
     }
 }
 EOF
 
-echo "Firewall rules loaded ($(echo "$ALL_IPS" | tr ',' '\n' | wc -l) ranges)."
+echo "Firewall rules loaded."
 
 # Start DNS proxy (updates nftables sets on resolution)
-MEMBRANE_ALLOW_HOSTNAMES=$(grep -vE '^#|^\s*$' "$HOSTNAMES_FILE") \
-    MEMBRANE_DNS_RESOLVER="$DNS_RESOLVER" \
-    dns-proxy &
+MEMBRANE_DNS_RESOLVER="$DNS_RESOLVER" MEMBRANE_ALLOW_FILE="$ALLOW_FILE" dns-proxy &
 DNS_PROXY_PID=$!
 echo "DNS proxy started (PID $DNS_PROXY_PID)."
 

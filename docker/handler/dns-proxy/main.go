@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -9,6 +11,58 @@ import (
 	"strings"
 	"time"
 )
+
+type allowRule struct {
+	Type  string `json:"type"`
+	Host  string `json:"host"`
+	Ports []int  `json:"ports"`
+}
+
+// buildAllowedHosts parses MEMBRANE_ALLOW JSON and returns a map of
+// hostname → allowed ports. A nil ports slice means any port is allowed.
+func buildAllowedHosts(allowJSON string) map[string][]int {
+	var rules []allowRule
+	if err := json.Unmarshal([]byte(allowJSON), &rules); err != nil {
+		log.Printf("dns-proxy: parse MEMBRANE_ALLOW: %v", err)
+		return make(map[string][]int)
+	}
+	allowed := make(map[string][]int)
+	for _, r := range rules {
+		if r.Type != "host" && r.Type != "url" {
+			continue
+		}
+		host := strings.ToLower(r.Host)
+		if host == "" {
+			continue
+		}
+		// If already any-port, no further expansion needed
+		if existing, ok := allowed[host]; ok && existing == nil {
+			continue
+		}
+		if len(r.Ports) == 0 {
+			allowed[host] = nil
+		} else {
+			allowed[host] = appendUniqueInts(allowed[host], r.Ports...)
+		}
+	}
+	return allowed
+}
+
+func appendUniqueInts(s []int, vals ...int) []int {
+	for _, v := range vals {
+		found := false
+		for _, x := range s {
+			if x == v {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s = append(s, v)
+		}
+	}
+	return s
+}
 
 func main() {
 	upstream := os.Getenv("MEMBRANE_DNS_RESOLVER")
@@ -19,15 +73,15 @@ func main() {
 		upstream += ":53"
 	}
 
-	// Build hostname allow set from env var
-	allowedRaw := os.Getenv("MEMBRANE_ALLOW_HOSTNAMES")
-	allowed := make(map[string]bool)
-	for _, h := range strings.Split(allowedRaw, "\n") {
-		h = strings.TrimSpace(strings.ToLower(h))
-		if h != "" && !strings.HasPrefix(h, "#") {
-			allowed[h] = true
-		}
+	allowFile := os.Getenv("MEMBRANE_ALLOW_FILE")
+	if allowFile == "" {
+		allowFile = "/etc/membrane/allow.json"
 	}
+	data, err := os.ReadFile(allowFile)
+	if err != nil {
+		log.Fatalf("dns-proxy: read allow file: %v", err)
+	}
+	allowed := buildAllowedHosts(string(data))
 	log.Printf("dns-proxy: tracking %d hostnames, upstream=%s", len(allowed), upstream)
 
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:53")
@@ -54,7 +108,7 @@ func main() {
 	}
 }
 
-func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstream string, allowed map[string]bool) {
+func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstream string, allowed map[string][]int) {
 	upstreamAddr, err := net.ResolveUDPAddr("udp", upstream)
 	if err != nil {
 		log.Printf("dns-proxy: resolve upstream: %v", err)
@@ -85,14 +139,26 @@ func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstr
 	name, ips := extractARecords(resp)
 	if name != "" && len(ips) > 0 {
 		name = strings.ToLower(strings.TrimRight(name, "."))
-		if allowed[name] {
+		if ports, ok := allowed[name]; ok {
 			for _, ip := range ips {
-				if err := exec.Command("nft", "add", "element", "ip", "membrane",
-					"allowed", "{", ip.String(), "}").Run(); err != nil {
-					log.Printf("dns-proxy: nft add %s: %v", ip, err)
+				if ports == nil {
+					// any port: add to allowed-any-port
+					if err := exec.Command("nft", "add", "element", "ip", "membrane",
+						"allowed-any-port", "{", ip.String() + "/32", "}").Run(); err != nil {
+						log.Printf("dns-proxy: nft add %s to allowed-any-port: %v", ip, err)
+					}
+				} else {
+					// port-constrained: add ip . port pairs
+					for _, port := range ports {
+						elem := fmt.Sprintf("%s . %d", ip.String(), port)
+						if err := exec.Command("nft", "add", "element", "ip", "membrane",
+							"allowed", "{", elem, "}").Run(); err != nil {
+							log.Printf("dns-proxy: nft add %s to allowed: %v", elem, err)
+						}
+					}
 				}
 			}
-			log.Printf("dns-proxy: %s → %v (added to allowed set)", name, ips)
+			log.Printf("dns-proxy: %s → %v (ports=%v)", name, ips, ports)
 		}
 	}
 
