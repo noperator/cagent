@@ -105,12 +105,20 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 
 // writeHostnames writes the hostnames list to a temp file and returns its path.
 // The file is not cleaned up — syscall.Exec replaces this process and the
-// OS handles /tmp cleanup.
+// OS handles cleanup.
 func writeHostnames(hostnames []string) (string, error) {
 	if len(hostnames) == 0 {
 		return "", fmt.Errorf("hostnames list is empty — add hostnames to ~/.membrane/config.yaml")
 	}
-	f, err := os.CreateTemp("", "membrane-hostnames-")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
+	tmpBase := filepath.Join(home, ".membrane", "tmp")
+	if err := os.MkdirAll(tmpBase, 0755); err != nil {
+		return "", fmt.Errorf("create tmp dir: %w", err)
+	}
+	f, err := os.CreateTemp(tmpBase, "membrane-hostnames-")
 	if err != nil {
 		return "", fmt.Errorf("create hostnames temp file: %w", err)
 	}
