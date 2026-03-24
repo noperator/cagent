@@ -157,7 +157,6 @@ func buildAgentArgs(workspaceDir string, m *mounts, cfg *config, passthrough []s
 		"--cap-add=CAP_SETPCAP",
 		"--network", s.internalNetwork,
 		"-e", "MEMBRANE_GATEWAY="+gatewayIP,
-		"-e", "MEMBRANE_DNS_RESOLVER="+cfg.Resolver,
 		"-v", workspaceDir+":/workspace",
 	)
 

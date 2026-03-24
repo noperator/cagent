@@ -4,8 +4,8 @@ set -e
 # Set default route through handler gateway
 ip route replace default via "$MEMBRANE_GATEWAY" 2>/dev/null || true
 
-# Set DNS resolver
-echo "nameserver ${MEMBRANE_DNS_RESOLVER:-1.1.1.1}" >/etc/resolv.conf
+# Point DNS at handler gateway (dns-proxy runs there)
+echo "nameserver $MEMBRANE_GATEWAY" >/etc/resolv.conf
 
 # Fix MTU
 ip link set dev eth0 mtu 1200 2>/dev/null || true

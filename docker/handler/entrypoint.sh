@@ -71,11 +71,16 @@ table ip membrane {
         oifname "$DEFAULT_GW_IF" masquerade
     }
 
+    chain input {
+        type filter hook input priority filter; policy accept;
+        iifname "$INTERNAL_IF" udp dport 53 accept
+    }
+
     chain forward {
         type filter hook forward priority filter; policy drop;
         ct state established,related accept
         tcp flags syn tcp option maxseg size set rt mtu
-        iifname "$INTERNAL_IF" ip daddr "$DNS_RESOLVER" udp dport 53 accept
+        iifname "$INTERNAL_IF" udp dport 53 accept
         iifname "$INTERNAL_IF" ip daddr @allowed accept
         iifname "$INTERNAL_IF" log prefix "[membrane BLOCKED] " limit rate 5/second
         iifname "$INTERNAL_IF" reject with icmp admin-prohibited
@@ -84,6 +89,13 @@ table ip membrane {
 EOF
 
 echo "Firewall rules loaded ($(echo "$ALL_IPS" | tr ',' '\n' | wc -l) ranges)."
+
+# Start DNS proxy (updates nftables sets on resolution)
+MEMBRANE_ALLOW_HOSTNAMES=$(grep -vE '^#|^\s*$' "$HOSTNAMES_FILE") \
+    MEMBRANE_DNS_RESOLVER="$DNS_RESOLVER" \
+    dns-proxy &
+DNS_PROXY_PID=$!
+echo "DNS proxy started (PID $DNS_PROXY_PID)."
 
 # Generate ephemeral CA keypair
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
