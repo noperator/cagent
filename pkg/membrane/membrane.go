@@ -49,7 +49,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		}
 	}
 
-	if err := ensureImage(repoDir); err != nil {
+	if err := ensureImages(repoDir); err != nil {
 		return err
 	}
 
@@ -82,7 +82,15 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		return err
 	}
 
-	args, containerName, err := buildArgs(workspaceDir, m, cfg, passthrough)
+	s := newSessionNames()
+
+	cleanup, gatewayIP, err := startSession(s)
+	defer cleanup()
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+
+	args, err := buildAgentArgs(workspaceDir, m, cfg, passthrough, s, gatewayIP)
 	if err != nil {
 		return err
 	}
@@ -96,13 +104,13 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 	// Resolve trace log path.
 	traceLogFile := traceLog
 	if traceLogFile == "" {
-		traceLogFile = filepath.Join(membraneDir, "trace", containerName+".jsonl.gz")
+		traceLogFile = filepath.Join(membraneDir, "trace", s.agentContainer+".jsonl.gz")
 	}
 	if err := os.MkdirAll(filepath.Dir(traceLogFile), 0o755); err != nil {
 		return fmt.Errorf("create trace dir: %w", err)
 	}
 
-	tracer := NewTracer(containerName, traceLogFile)
+	tracer := NewTracer(s.agentContainer, traceLogFile)
 	if err := tracer.Start(); err != nil {
 		return fmt.Errorf("tracee failed to start: %w\nRe-run with --no-trace to start without tracing", err)
 	}
@@ -126,7 +134,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 	// Retry docker inspect until the container exists (up to ~5s).
 	var cid string
 	for i := 0; i < 10; i++ {
-		out, err := exec.Command("docker", "inspect", "-f", "{{.Id}}", containerName).Output()
+		out, err := exec.Command("docker", "inspect", "-f", "{{.Id}}", s.agentContainer).Output()
 		if err == nil {
 			cid = strings.TrimSpace(string(out))
 			break
@@ -134,7 +142,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		time.Sleep(500 * time.Millisecond)
 	}
 	if cid == "" {
-		return fmt.Errorf("could not resolve container ID for %s", containerName)
+		return fmt.Errorf("could not resolve container ID for %s", s.agentContainer)
 	}
 
 	tracer.StartStreaming(cid)
@@ -147,7 +155,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		// Signal received; stop the agent container so execDocker unblocks
 		// and restores the terminal. Tracee cleaned up by deferred tracer.Stop().
 		fmt.Fprintln(os.Stderr, "\r\nmembrane: stopping...")
-		_ = exec.Command("docker", "stop", "-t", "2", containerName).Run()
+		_ = exec.Command("docker", "stop", "-t", "2", s.agentContainer).Run()
 		<-agentErr
 	}
 	return result
@@ -183,5 +191,5 @@ func checkAndUpdate(repoDir string) error {
 		return err
 	}
 
-	return buildImage(repoDir)
+	return buildImages(repoDir)
 }

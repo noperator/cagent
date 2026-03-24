@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	repoURL   = "https://github.com/noperator/membrane.git"
-	apiURL    = "https://api.github.com/repos/noperator/membrane/commits/main"
-	imageName = "membrane"
+	repoURL          = "https://github.com/noperator/membrane.git"
+	apiURL           = "https://api.github.com/repos/noperator/membrane/commits/main"
+	agentImageName   = "membrane-agent"
+	handlerImageName = "membrane-handler"
 )
 
 // Reset removes selected membrane state. components is a string of
@@ -53,19 +54,22 @@ func Reset(components string) error {
 	}
 
 	if doC {
-		out, err := exec.Command("docker", "ps", "-q", "--filter", "ancestor="+imageName).Output()
-		if err != nil {
-			return fmt.Errorf("list containers: %w", err)
-		}
-		for _, id := range strings.Fields(string(out)) {
-			if err := exec.Command("docker", "rm", "-f", id).Run(); err != nil {
-				return fmt.Errorf("remove container %s: %w", id, err)
+		for _, img := range []string{agentImageName, handlerImageName} {
+			out, err := exec.Command("docker", "ps", "-q", "--filter", "ancestor="+img).Output()
+			if err != nil {
+				return fmt.Errorf("list containers: %w", err)
+			}
+			for _, id := range strings.Fields(string(out)) {
+				if err := exec.Command("docker", "rm", "-f", id).Run(); err != nil {
+					return fmt.Errorf("remove container %s: %w", id, err)
+				}
 			}
 		}
 	}
 
 	if doI {
-		exec.Command("docker", "rmi", imageName).Run() // ignore error — may not exist
+		exec.Command("docker", "rmi", agentImageName).Run()   // ignore error — may not exist
+		exec.Command("docker", "rmi", handlerImageName).Run() // ignore error — may not exist
 	}
 
 	if doD {
@@ -174,26 +178,43 @@ func update(repoDir string) error {
 	return writeCommit(repoDir)
 }
 
-// ensureImage checks if the membrane Docker image exists locally.
-// If not, builds it from repoDir.
-func ensureImage(repoDir string) error {
-	out, err := exec.Command("docker", "images", "-q", imageName).Output()
-	if err != nil {
-		return fmt.Errorf("check docker image: %w", err)
+// ensureImages checks if both membrane Docker images exist locally.
+// Builds any that are missing from repoDir.
+func ensureImages(repoDir string) error {
+	for _, img := range []struct{ name, context string }{
+		{agentImageName, "docker/agent"},
+		{handlerImageName, "docker/handler"},
+	} {
+		out, err := exec.Command("docker", "images", "-q", img.name).Output()
+		if err != nil {
+			return fmt.Errorf("check docker image %s: %w", img.name, err)
+		}
+		if strings.TrimSpace(string(out)) != "" {
+			continue
+		}
+		if err := buildImageFromDir(img.name, filepath.Join(repoDir, img.context)); err != nil {
+			return err
+		}
 	}
-	if strings.TrimSpace(string(out)) != "" {
-		return nil // image exists
-	}
-	return buildImage(repoDir)
+	return nil
 }
 
-// buildImage runs docker build -t membrane <repoDir>.
-func buildImage(repoDir string) error {
-	cmd := exec.Command("docker", "build", "-t", imageName, repoDir)
+// buildImages builds both membrane Docker images from repoDir.
+func buildImages(repoDir string) error {
+	if err := buildImageFromDir(agentImageName, filepath.Join(repoDir, "docker/agent")); err != nil {
+		return err
+	}
+	return buildImageFromDir(handlerImageName, filepath.Join(repoDir, "docker/handler"))
+}
+
+// buildImageFromDir runs docker build -t name dir.
+func buildImageFromDir(name, dir string) error {
+	fmt.Fprintf(os.Stderr, "Building %s image...\n", name)
+	cmd := exec.Command("docker", "build", "-t", name, dir)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker build: %w", err)
+		return fmt.Errorf("docker build %s: %w", name, err)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty/v2"
 	"golang.org/x/term"
@@ -29,16 +30,101 @@ func hasSysbox() bool {
 	return strings.Contains(string(out), "sysbox-runc")
 }
 
-// buildArgs constructs the full argument list for docker run.
+type sessionNames struct {
+	id               string
+	agentContainer   string
+	handlerContainer string
+	internalNetwork  string
+	externalNetwork  string
+}
+
+func newSessionNames() sessionNames {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	id := hex.EncodeToString(b[:])
+	return sessionNames{
+		id:               id,
+		agentContainer:   "membrane-agent-" + id,
+		handlerContainer: "membrane-handler-" + id,
+		internalNetwork:  "membrane-internal-" + id,
+		externalNetwork:  "membrane-external-" + id,
+	}
+}
+
+// startSession creates per-session networks, starts the handler container,
+// waits for it to signal ready, and returns a cleanup func and the handler's
+// IP on the internal network.
+func startSession(s sessionNames) (func(), string, error) {
+	cleanup := func() {
+		exec.Command("docker", "stop", "-t", "2", s.handlerContainer).Run()
+		exec.Command("docker", "network", "rm", s.internalNetwork).Run()
+		exec.Command("docker", "network", "rm", s.externalNetwork).Run()
+	}
+
+	if out, err := exec.Command("docker", "network", "create",
+		s.externalNetwork).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("create network %s: %s: %w",
+			s.externalNetwork, out, err)
+	}
+	if out, err := exec.Command("docker", "network", "create",
+		"--internal", s.internalNetwork).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("create network %s: %s: %w",
+			s.internalNetwork, out, err)
+	}
+
+	handlerArgs := []string{
+		"run", "-d", "--rm",
+		"--name", s.handlerContainer,
+		"--network", s.externalNetwork,
+		"--cap-add=NET_ADMIN",
+		"--sysctl", "net.ipv4.ip_forward=1",
+		handlerImageName,
+	}
+	if out, err := exec.Command("docker", handlerArgs...).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("start handler: %s: %w", out, err)
+	}
+
+	if out, err := exec.Command("docker", "network", "connect",
+		s.internalNetwork, s.handlerContainer).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("connect handler to internal network: %s: %w", out, err)
+	}
+
+	// Wait for handler ready signal (timeout 30s).
+	for i := 0; i < 30; i++ {
+		if exec.Command("docker", "exec", s.handlerContainer,
+			"test", "-f", "/tmp/handler-ready").Run() == nil {
+			break
+		}
+		if i == 29 {
+			logs, _ := exec.Command("docker", "logs",
+				s.handlerContainer).CombinedOutput()
+			return cleanup, "", fmt.Errorf(
+				"handler did not become ready within 30s\nHandler logs:\n%s", logs)
+		}
+		time.Sleep(time.Second)
+	}
+
+	out, err := exec.Command("docker", "inspect", "-f",
+		fmt.Sprintf("{{(index .NetworkSettings.Networks %q).IPAddress}}",
+			s.internalNetwork),
+		s.handlerContainer).Output()
+	if err != nil {
+		return cleanup, "", fmt.Errorf("inspect handler IP: %w", err)
+	}
+	gatewayIP := strings.TrimSpace(string(out))
+	if gatewayIP == "" {
+		return cleanup, "", fmt.Errorf("handler has no IP on %s", s.internalNetwork)
+	}
+
+	return cleanup, gatewayIP, nil
+}
+
+// buildAgentArgs constructs the full argument list for docker run of the agent.
 // passthrough args are appended after the image name as the container command.
-// Returns the args, the generated container name, and any error.
-func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string) ([]string, string, error) {
+func buildAgentArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string, s sessionNames, gatewayIP string) ([]string, error) {
 	sysbox := hasSysbox()
 
-	var suffix [8]byte
-	_, _ = rand.Read(suffix[:])
-	containerName := "membrane-" + hex.EncodeToString(suffix[:])
-	args := []string{"run", "-it", "--rm", "--init", "--name", containerName}
+	args := []string{"run", "-it", "--rm", "--init", "--name", s.agentContainer}
 
 	if sysbox {
 		args = append(args, "--runtime=sysbox-runc", "-e", "MEMBRANE_DIND=1")
@@ -46,7 +132,8 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 
 	args = append(args,
 		"--cap-add=NET_ADMIN",
-		"--cap-add=NET_RAW",
+		"--network", s.internalNetwork,
+		"-e", "MEMBRANE_GATEWAY="+gatewayIP,
 		"-v", workspaceDir+":/workspace",
 	)
 
@@ -65,11 +152,11 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("get home dir: %w", err)
+		return nil, fmt.Errorf("get home dir: %w", err)
 	}
 	agentHome := filepath.Join(home, ".membrane", "home")
 	if err := os.MkdirAll(agentHome, 0755); err != nil {
-		return nil, "", fmt.Errorf("create agent home dir: %w", err)
+		return nil, fmt.Errorf("create agent home dir: %w", err)
 	}
 	args = append(args, "-v", agentHome+":/home/agent")
 
@@ -77,7 +164,7 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	// firewall.sh expects it.
 	hostnamesFile, err := writeHostnames(cfg.Hostnames)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	args = append(args, "-v", hostnamesFile+":/usr/local/etc/hostnames.txt:ro")
 
@@ -95,12 +182,12 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	}
 
 	// Image name.
-	args = append(args, imageName)
+	args = append(args, agentImageName)
 
 	// Passthrough args (non-flag arguments to membrane binary).
 	args = append(args, passthrough...)
 
-	return args, containerName, nil
+	return args, nil
 }
 
 // writeHostnames writes the hostnames list to a temp file and returns its path.
