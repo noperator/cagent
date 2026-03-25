@@ -35,7 +35,9 @@ readonly:
 #   - dest: https://api.example.com
 #     http:
 #       - methods: [POST]
-#         paths: [/v1/messages]
+#         paths:
+#           - messages        # relative to URL path: /v1/messages
+#           - /other/path     # absolute path
 allow:
   # Anthropic
   - api.anthropic.com

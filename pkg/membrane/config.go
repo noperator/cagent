@@ -30,14 +30,13 @@ func (c *config) dnsResolver() string {
 // AllowRule represents a single entry in the allow list.
 // Type is one of "cidr", "host", or "url".
 type AllowRule struct {
-	Type    string     `json:"type"`
-	CIDR    string     `json:"cidr,omitempty"`
-	Host    string     `json:"host,omitempty"`
-	Ports   []int      `json:"ports,omitempty"` // nil = any port
-	Scheme  string     `json:"scheme,omitempty"`
-	Path    string     `json:"path,omitempty"`
-	IsRegex bool       `json:"is_regex,omitempty"`
-	HTTP    []HTTPRule `json:"http,omitempty"`
+	Type   string     `json:"type"`
+	CIDR   string     `json:"cidr,omitempty"`
+	Host   string     `json:"host,omitempty"`
+	Ports  []int      `json:"ports,omitempty"` // nil = any port
+	Scheme string     `json:"scheme,omitempty"`
+	Path   string     `json:"path,omitempty"`
+	HTTP   []HTTPRule `json:"http,omitempty"`
 }
 
 type HTTPRule struct {
@@ -46,8 +45,7 @@ type HTTPRule struct {
 }
 
 type PathRule struct {
-	Path    string `json:"path"`
-	IsRegex bool   `json:"is_regex,omitempty"`
+	Path string `json:"path"`
 }
 
 func (r *AllowRule) UnmarshalYAML(value *yaml.Node) error {
@@ -94,6 +92,11 @@ func (r *AllowRule) parseAuto(s string) error {
 			r.Ports = []int{443}
 		} else if u.Scheme == "http" {
 			r.Ports = []int{80}
+		}
+		if r.Path != "" && r.Path != "/" {
+			r.HTTP = []HTTPRule{
+				{Paths: []PathRule{{Path: r.Path}}},
+			}
 		}
 		return nil
 	}
@@ -148,6 +151,7 @@ func (r *AllowRule) parseMappingNode(value *yaml.Node) error {
 	}
 
 	if httpNode != nil {
+		r.HTTP = nil
 		for _, ruleNode := range httpNode.Content {
 			var hr HTTPRule
 			for i := 0; i+1 < len(ruleNode.Content); i += 2 {
@@ -160,10 +164,7 @@ func (r *AllowRule) parseMappingNode(value *yaml.Node) error {
 					}
 				case "paths":
 					for _, n := range val.Content {
-						hr.Paths = append(hr.Paths, PathRule{
-							Path:    n.Value,
-							IsRegex: n.Tag == "!regex",
-						})
+						hr.Paths = append(hr.Paths, PathRule{Path: n.Value})
 					}
 				}
 			}

@@ -21,6 +21,7 @@ RUN mkdir -p /etc/membrane
 
 COPY --from=builder /dns-proxy /usr/local/bin/dns-proxy
 COPY entrypoint.sh /entrypoint.sh
+COPY addon.py /addon.py
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

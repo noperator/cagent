@@ -111,6 +111,7 @@ mitmdump \
     --listen-port "$MITMPROXY_PORT" \
     --set confdir=/tmp/mitmproxy \
     --ssl-insecure \
+    -s /addon.py \
     &
 
 # Wait for mitmproxy to bind its port (timeout 15s)
