@@ -3,6 +3,7 @@ package membrane
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,35 +11,164 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty/v2"
 	"golang.org/x/term"
 )
 
-func hasSysbox() bool {
-	if runtime.GOOS != "linux" {
-		return false
+// writeAllowFile serialises allow rules to a temp file and returns its path.
+// The caller is responsible for removing the file when done.
+func writeAllowFile(allow []AllowRule) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
 	}
-	out, err := exec.Command("docker", "info").Output()
+	dir := filepath.Join(home, ".membrane", "tmp")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("create tmp dir: %w", err)
+	}
+	f, err := os.CreateTemp(dir, "membrane-allow-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create allow file: %w", err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(allow); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write allow file: %w", err)
+	}
+	return f.Name(), nil
+}
+
+func hasSysbox() bool {
+	out, err := exec.Command("docker", "info", "--format",
+		"{{json .Runtimes}}").Output()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), "sysbox-runc")
+	return strings.Contains(string(out), `"sysbox-runc"`)
 }
 
-// buildArgs constructs the full argument list for docker run.
+type sessionNames struct {
+	id               string
+	agentContainer   string
+	handlerContainer string
+	internalNetwork  string
+	externalNetwork  string
+	caVolume         string
+}
+
+func newSessionNames() sessionNames {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	id := hex.EncodeToString(b[:])
+	return sessionNames{
+		id:               id,
+		agentContainer:   "membrane-agent-" + id,
+		handlerContainer: "membrane-handler-" + id,
+		internalNetwork:  "membrane-internal-" + id,
+		externalNetwork:  "membrane-external-" + id,
+		caVolume:         "membrane-ca-" + id,
+	}
+}
+
+// startSession creates per-session networks, starts the handler container,
+// waits for it to signal ready, and returns a cleanup func and the handler's
+// IP on the internal network.
+func startSession(s sessionNames, cfg *config) (func(), string, error) {
+	cleanup := func() {
+		_ = exec.Command("docker", "stop", "-t", "2", s.handlerContainer).Run()
+		_ = exec.Command("docker", "network", "rm", s.internalNetwork).Run()
+		_ = exec.Command("docker", "network", "rm", s.externalNetwork).Run()
+		_ = exec.Command("docker", "volume", "rm", s.caVolume).Run()
+	}
+
+	if out, err := exec.Command("docker", "volume", "create",
+		s.caVolume).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("create ca volume %s: %s: %w",
+			s.caVolume, out, err)
+	}
+
+	if out, err := exec.Command("docker", "network", "create",
+		s.externalNetwork).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("create network %s: %s: %w",
+			s.externalNetwork, out, err)
+	}
+	if out, err := exec.Command("docker", "network", "create",
+		"--internal", s.internalNetwork).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("create network %s: %s: %w",
+			s.internalNetwork, out, err)
+	}
+
+	allowFile, err := writeAllowFile(cfg.Allow)
+	if err != nil {
+		return cleanup, "", fmt.Errorf("write allow file: %w", err)
+	}
+	origCleanup := cleanup
+	cleanup = func() {
+		origCleanup()
+		os.Remove(allowFile)
+	}
+
+	handlerArgs := []string{
+		"run", "-d", "--rm",
+		"--name", s.handlerContainer,
+		"--network", s.externalNetwork,
+		"--cap-add=NET_ADMIN",
+		"--sysctl", "net.ipv4.ip_forward=1",
+		"-v", s.caVolume + ":/membrane-ca",
+		"-v", allowFile + ":/etc/membrane/allow.json:ro",
+		"-e", "MEMBRANE_DNS_RESOLVER=" + cfg.dnsResolver(),
+		handlerImageName,
+	}
+
+	if out, err := exec.Command("docker", handlerArgs...).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("start handler: %s: %w", out, err)
+	}
+
+	if out, err := exec.Command("docker", "network", "connect",
+		s.internalNetwork, s.handlerContainer).CombinedOutput(); err != nil {
+		return cleanup, "", fmt.Errorf("connect handler to internal network: %s: %w", out, err)
+	}
+
+	// Wait for handler ready signal (timeout 30s).
+	for i := 0; i < 30; i++ {
+		if exec.Command("docker", "exec", s.handlerContainer,
+			"test", "-f", "/tmp/handler-ready").Run() == nil {
+			break
+		}
+		if i == 29 {
+			logs, _ := exec.Command("docker", "logs",
+				s.handlerContainer).CombinedOutput()
+			return cleanup, "", fmt.Errorf(
+				"handler did not become ready within 30s\nHandler logs:\n%s", logs)
+		}
+		time.Sleep(time.Second)
+	}
+
+	out, err := exec.Command("docker", "inspect", "-f",
+		fmt.Sprintf("{{(index .NetworkSettings.Networks %q).IPAddress}}",
+			s.internalNetwork),
+		s.handlerContainer).Output()
+	if err != nil {
+		return cleanup, "", fmt.Errorf("inspect handler IP: %w", err)
+	}
+	gatewayIP := strings.TrimSpace(string(out))
+	if gatewayIP == "" {
+		return cleanup, "", fmt.Errorf("handler has no IP on %s", s.internalNetwork)
+	}
+
+	return cleanup, gatewayIP, nil
+}
+
+// buildAgentArgs constructs the full argument list for docker run of the agent.
 // passthrough args are appended after the image name as the container command.
-// Returns the args, the generated container name, and any error.
-func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string) ([]string, string, error) {
+func buildAgentArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string, s sessionNames, gatewayIP string) ([]string, error) {
 	sysbox := hasSysbox()
 
-	var suffix [8]byte
-	_, _ = rand.Read(suffix[:])
-	containerName := "membrane-" + hex.EncodeToString(suffix[:])
-	args := []string{"run", "-it", "--rm", "--init", "--name", containerName}
+	args := []string{"run", "-it", "--rm", "--init", "--name", s.agentContainer}
 
 	if sysbox {
 		args = append(args, "--runtime=sysbox-runc", "-e", "MEMBRANE_DIND=1")
@@ -46,7 +176,9 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 
 	args = append(args,
 		"--cap-add=NET_ADMIN",
-		"--cap-add=NET_RAW",
+		"--cap-add=CAP_SETPCAP",
+		"--network", s.internalNetwork,
+		"-e", "MEMBRANE_GATEWAY="+gatewayIP,
 		"-v", workspaceDir+":/workspace",
 	)
 
@@ -65,27 +197,22 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("get home dir: %w", err)
+		return nil, fmt.Errorf("get home dir: %w", err)
 	}
 	agentHome := filepath.Join(home, ".membrane", "home")
 	if err := os.MkdirAll(agentHome, 0755); err != nil {
-		return nil, "", fmt.Errorf("create agent home dir: %w", err)
+		return nil, fmt.Errorf("create agent home dir: %w", err)
 	}
 	args = append(args, "-v", agentHome+":/home/agent")
-
-	// Write merged hostnames list to a temp file and mount it where
-	// firewall.sh expects it.
-	hostnamesFile, err := writeHostnames(cfg.Hostnames)
-	if err != nil {
-		return nil, "", err
-	}
-	args = append(args, "-v", hostnamesFile+":/usr/local/etc/hostnames.txt:ro")
-
-	args = append(args, "-e", "MEMBRANE_RESOLVER="+cfg.Resolver)
-
-	if len(cfg.Cidrs) > 0 {
-		args = append(args, "-e", "MEMBRANE_CIDRS="+strings.Join(cfg.Cidrs, ","))
-	}
+	args = append(args, "-v", s.caVolume+":/membrane-ca:ro")
+	args = append(args,
+		// CA trust for runtimes that don't use the system store by default
+		"-e", "NODE_EXTRA_CA_CERTS=/membrane-ca/ca.crt",
+		"-e", "NODE_USE_SYSTEM_CA=1",
+		"-e", "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+		"-e", "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+		"-e", "CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+	)
 
 	// Extra args from config.
 	args = append(args, cfg.Args...)
@@ -95,30 +222,12 @@ func buildArgs(workspaceDir string, m *mounts, cfg *config, passthrough []string
 	}
 
 	// Image name.
-	args = append(args, imageName)
+	args = append(args, agentImageName)
 
 	// Passthrough args (non-flag arguments to membrane binary).
 	args = append(args, passthrough...)
 
-	return args, containerName, nil
-}
-
-// writeHostnames writes the hostnames list to a temp file and returns its path.
-// The file is not cleaned up — syscall.Exec replaces this process and the
-// OS handles /tmp cleanup.
-func writeHostnames(hostnames []string) (string, error) {
-	if len(hostnames) == 0 {
-		return "", fmt.Errorf("hostnames list is empty — add hostnames to ~/.membrane/config.yaml")
-	}
-	f, err := os.CreateTemp("", "membrane-hostnames-")
-	if err != nil {
-		return "", fmt.Errorf("create hostnames temp file: %w", err)
-	}
-	defer f.Close()
-	for _, d := range hostnames {
-		fmt.Fprintln(f, d)
-	}
-	return f.Name(), nil
+	return args, nil
 }
 
 // ExitError carries the exit code from the docker run child process.

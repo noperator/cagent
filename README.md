@@ -13,7 +13,7 @@ Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you
 
 ### Features
 
-- **Network egress filtering**: Hostnames are whitelisted, DNS-resolved at startup, and refreshed continuously.<br><sub>&emsp;*Most tools don't filter the network at all, or require manual iptables rules that are easy to misconfigure.*</sub>
+- **Network egress filtering**: Allowed hosts, ports, HTTP methods, and HTTP paths are enforced via firewall/proxy.<br><sub>&emsp;*Most tools don't filter the network at all, or require manual iptables rules that are easy to misconfigure.*</sub>
 - **Filesystem isolation**: Sensitive files can be masked and made invisible to the agent, or mounted read-only.<br><sub>&emsp;*Most tools offer no granular filesystem controls on top of bind mounts.*</sub>
 - **Observability**: eBPF traces all agent filesystem, network, and process activity at the kernel level.<br><sub>&emsp;*Most tools offer no runtime visibility into what the agent is actually doing.*</sub>
 - **Nested containers**: Docker-in-Docker via unprivileged Sysbox containers.<br><sub>&emsp;*Most tools require `--privileged` (unsafe) or a separate hypervisor.*</sub>
@@ -24,19 +24,21 @@ Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you
 
 ## Getting started
 
+### Prerequisites
+
+Membrane has been tested on macOS and Ubuntu Linux. On **macOS**, [Homebrew](https://brew.sh) must be installed for the first-run install script to install Colima and Docker CLI (if needed). On **Linux**, [Docker Engine](https://docs.docker.com/engine/install/ubuntu/) must be installed and running; the first-run install script installs Sysbox on top of an existing Docker installation.
+
 ### Install
 
 ```bash
 go install github.com/noperator/membrane/cmd/membrane@latest
-ln -s $(go env GOPATH)/bin/membrane $(go env GOPATH)/bin/mb  # optional short alias
 ```
 
-On first run, membrane will clone the repo to `~/.membrane/src/`, build the Docker image, and write a default config to `~/.membrane/config.yaml`. Subsequent runs check for updates automatically.
+On first run, membrane checks that all dependencies are present (or otherwise offers to install them). It then clones the repo to `~/.membrane/src/`, builds the `membrane-agent` and `membrane-handler` Docker images, and writes a default config to `~/.membrane/config.yaml`. Subsequent runs check for updates automatically. Initial install takes about 5 minutes.
 
-```bash
-cd /your/workspace
-membrane
-```
+On **macOS**, membrane runs inside a dedicated [Colima](https://github.com/abiosoft/colima) VM with [Sysbox](https://github.com/nestybox/sysbox) installed. If these aren't present, membrane will offer to run [`scripts/install-macos.sh`](scripts/install-macos.sh) which installs Colima and Docker CLI via Homebrew, creates a dedicated Colima VM, and installs Sysbox inside the VM and registers it as a Docker runtime. The dedicated Colima profile keeps membrane's containers and images isolated from your existing Docker setup.
+
+On **Linux**, membrane uses the system Docker daemon directly. If Sysbox isn't installed, membrane will offer to run [`scripts/install-linux.sh`](scripts/install-linux.sh) which installs and registers it automatically.
 
 ### Usage
 
@@ -52,18 +54,18 @@ Options:
       --trace-log string   path for trace log file (default: ~/.membrane/trace/<id>.jsonl.gz)
 
 Config:
-  -a, --arg stringArray        extra docker run argument (repeatable)
-  -c, --cidr stringArray       allowed IP or CIDR range (repeatable)
-  -n, --hostname stringArray   allowed hostname (repeatable)
+  -a, --allow stringArray      allow rule: hostname, IP, CIDR, or URL (repeatable)
+      --arg stringArray        extra docker run argument (repeatable)
+      --dns-resolver string    DNS resolver (overrides config file)
   -i, --ignore stringArray     ignore pattern (repeatable)
   -r, --readonly stringArray   readonly pattern (repeatable)
-      --resolver string        DNS resolver (overrides config file)
 ```
 
 Optionally pass a specific command to be executed, using `--` to separate membrane options from the command to run inside the container.
 
 ```bash
 # Drop into a shell
+cd /your/workspace
 membrane
 
 # Run a specific command
@@ -77,7 +79,8 @@ When stdin is not a terminal, membrane automatically skips PTY allocation and wi
 
 ```bash
 # Pipe input
-echo 'Today is my birthday, but no one noticed.' | membrane -- claude -p 'Tell me something nice.'
+echo 'Today is my birthday, but no one noticed.' |
+    membrane -- claude -p 'Tell me something nice.'
 
 Happy birthday! 🎂
 
@@ -92,28 +95,31 @@ This is twenty chars
 
 <details><summary>Advanced usage</summary>
 
-#### Modify the image
+#### Modify the images
 
-If you want to customize the Dockerfile, firewall rules, or entrypoint, edit the files in `~/.membrane/src/` and rebuild:
+If you want to customize the Dockerfiles, firewall rules, or entrypoints, edit the files in `~/.membrane/src/` and rebuild:
 
 ```bash
-docker build -t membrane ~/.membrane/src/
+docker build -t membrane-agent ~/.membrane/src/docker/agent/
+docker build -t membrane-handler ~/.membrane/src/docker/handler/
 ```
 
 If you've made local edits and an update is available, membrane will back up `~/.membrane/src/` to a timestamped directory before pulling.
 
 #### Reset
 
-`membrane --reset` will remove running containers, the Docker image, and `~/.membrane/`. Workspace `.membrane.yaml` files are not affected. You can also reset individual components:
+`membrane --reset` will remove running containers, the Docker images, and `~/.membrane/`. Workspace `.membrane.yaml` files are not affected. You can also reset individual components:
 
 ```bash
 membrane --reset=cid   # all
-membrane --reset=ci    # containers and image only
+membrane --reset=ci    # containers and images only
 ```
+
+</details>
 
 ### Trace execution
 
-By default, membrane records a eBPF trace of everything the agent does. In this example, I just tell Claude to go download the homepage of my blog.
+By default, membrane records an eBPF trace of everything the agent does. In this example, I just tell Claude to go download the homepage of my blog.
 
 ```bash
 membrane --trace-log=blog.jsonl -- \
@@ -240,78 +246,85 @@ conn  claude: AF_INET 34.149.66.137:443
 
 </details>
 
-</details>
-
 ### Configure
 
 Configuration is YAML and works at two levels:
 
-- **Global** (`~/.membrane/config.yaml`): Applies to every workspace. Written from the default template on first run. Edit this to set your baseline hostnames, ignore patterns, and readonly patterns.
+- **Global** (`~/.membrane/config.yaml`): Applies to every workspace. Written from the default template on first run. Edit this to set your baseline allow list, ignore patterns, and readonly patterns.
 - **Workspace** (`.membrane.yaml` in your project root): Applies to the current workspace only. Lists in the workspace config are appended to the global config, not replaced.
 
 ```yaml
-# `resolver` is the DNS resolver used by both the firewall and the
-# container. Defaults to 8.8.8.8 if not set.
-resolver: 1.1.1.1
+# `dns_resolver` is the upstream DNS resolver. Defaults to 1.1.1.1.
+dns_resolver: 1.1.1.1
 
 # `ignore` lists patterns matched against filenames or relative paths.
 # Matching files and directories are shadowed with an empty placeholder
-# inside the container — the agent can see they exist but cannot read
+# inside the container; the agent can see they exist but cannot read
 # their contents.
 ignore:
   - secrets/
   - "*.pem"
 
-# `readonly` lists patterns mounted into the container as read-only. Use
-# this for things like .git (so the agent can read history but not
-# rewrite it) or credential files that should be visible but not
-# writable.
+# `readonly` lists patterns mounted into the container as read-only.
 readonly:
   - config/
 
-# `hostnames` lists hostnames the agent is allowed to reach. The firewall
-# resolves these to IPs at startup and refreshes continuously. Anything
-# not listed is dropped.
-hostnames:
+# `allow` lists what the agent is allowed to reach. Each entry is
+# auto-detected from its value:
+#
+#   hostname:  DNS-resolved, any port, no L7 filtering
+#   IP:        added directly to firewall as /32
+#   CIDR:      added directly to firewall
+#   URL:       DNS-resolved, port from scheme, L7 filtering via mitmproxy
+#
+# Object form supports additional constraints. For hostnames, `ports`
+# restricts to specific ports. For URLs, `http` enables L7 enforcement:
+# methods and paths are OR'd within a rule, rules are OR'd within `http`.
+# Paths without a leading `/` are relative to the URL's path prefix.
+# If no `http` key is present, all methods and paths are allowed.
+allow:
+  # plain hostname: any port, any method, passthrough
   - internal.mycompany.com
 
-# `cidrs` lists IP addresses or CIDR ranges added directly to the firewall
-# allowlist without DNS resolution. Bare IPs are treated as /32.
-cidrs:
+  # hostname with port restriction
+  - dest: registry.mycompany.com
+    ports: [443]
+
+  # IP and CIDR: bypass DNS, added directly to firewall
   - 192.168.2.1
   - 192.168.3.0/24
 
-# `args` lists raw arguments appended to the `docker run` command that
-# launches the agent container. Use this to pass environment variables,
-# additional mounts, port mappings, or anything else accepted by
-# `docker run`. Environment variables are expanded ($VAR, ${VAR})
-# anywhere in a value, including mid-string (e.g. MY_PATH=$HOME/mydir).
-# Shell command substitution ($(...)) is not supported — set secrets in
-# your shell environment first and reference them here. Values are
-# passed directly to `docker run` without shell interpretation. Do not
-# add shell-style quoting around values — quotes are treated as literal
-# characters. Each flag and its argument must be separate list items.
+  # URL: allow all methods/paths under /v1/ (no http key)
+  - https://api.anthropic.com/v1/
+
+  # URL: restrict to specific methods and paths
+  - dest: https://api.anthropic.com/v1/
+    http:
+      - methods: [POST]
+        paths:
+          - messages    # relative: /v1/messages
+          - /v1/models  # absolute path
+
+  # URL: multiple rules (OR semantics)
+  - dest: https://api.example.com/posts/
+    http:
+      - methods: [GET]   # GET anything under /posts/
+      - methods: [POST]  # POST only to /posts/new
+        paths: [new]
+
+# `args` lists raw arguments appended to the `docker run` command.
+# Environment variables are expanded ($VAR, ${VAR}). Each flag and
+# its argument must be separate items.
 args:
   - -e
   - MY_API_KEY=abc123
-  - -e
-  - "MY_VALUE=my value with space"
   - -v
   - $HOME/.aws:/home/agent/.aws:ro
   - -e
   - AWS_PROFILE=myprofile
 ```
 
-See [`config-default.yaml`](config-default.yaml) for the full default config including the built-in hostname allowlist.
-
-
-### Troubleshooting
-
-This project is an experimental work in progress. There are likely more opportunities to lock this down further. A few common issues:
-
-- **Network not working:** The firewall resolves hostnames to IPs at startup. If a CDN rotates IPs, the connection may fail until the next refresh (every 60s). Check `/var/log/firewall-updater.log` inside the container for refresh status.
-
-- **Docker-in-Docker not working:** Sysbox must be installed on the host. membrane detects it automatically; if it's not present, Docker-in-Docker is silently disabled.
+See [`config-default.yaml`](config-default.yaml) for the full default allow list.
 
 ## Back matter
 
@@ -324,22 +337,27 @@ This project is an experimental work in progress. There are likely more opportun
 
 ### To-do
 
-- [ ] support Docker-in-Docker on macOS
 - [ ] support Docker checkpoint
-- [ ] whitelist HTTPS paths/endpoints
+- [ ] support wildcard hostnames
+- [ ] detect HTTP(S) via bytes vs ports
+- [ ] optimize startup/teardown time
+- [ ] move tracee from dedicated sidecar into handler
 
 <details><summary>Completed</summary>
 
-- [x] pass via config via CLI (in addition to file)
-- [x] whitelist IPs
+- [x] support Docker-in-Docker on macOS
+- [x] whitelist HTTPS paths/endpoints with L7 method/path filtering
+- [x] pass config via CLI (in addition to file)
+- [x] whitelist IPs and CIDRs
 - [x] set custom DNS resolver
 - [x] mount agent home dir as ~/.membrane/home on host
 - [x] monitor agent with eBPF
-- [x] specify hostnames at runtime
+- [x] specify allow rules at runtime
 - [x] git-aware read-only mounts
-- [x] refresh firewall after init
+- [x] refresh firewall on DNS resolution (dns-proxy)
 - [x] quiet down logging a bit
 - [x] make ignore/readonly configurable
 - [x] allow reading from host stdin (to be used in pipeline)
+- [x] auto-install prerequisites on first run
 
 </details>

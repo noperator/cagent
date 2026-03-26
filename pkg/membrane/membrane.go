@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -15,19 +16,27 @@ import (
 // CLIOverrides holds config values passed via CLI flags. List fields are
 // appended to the merged file config; scalar fields replace it.
 type CLIOverrides struct {
-	Ignore    []string
-	Readonly  []string
-	Hostnames []string
-	Cidrs     []string
-	Args      []string
-	Resolver  string
+	Ignore      []string
+	Readonly    []string
+	Allow       []string // raw strings, parsed via ParseAllowEntry
+	Args        []string
+	DNSResolver string
 }
 
 // Run is the main entry point called from cmd/membrane/main.go.
 // passthrough args are forwarded as the container command.
 func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli CLIOverrides) error {
+
+	if runtime.GOOS == "darwin" {
+		os.Setenv("DOCKER_CONTEXT", "colima-membrane")
+	}
+
 	repoDir, err := ensureRepo()
 	if err != nil {
+		return err
+	}
+
+	if err := ensureDeps(repoDir); err != nil {
 		return err
 	}
 
@@ -49,7 +58,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		}
 	}
 
-	if err := ensureImage(repoDir); err != nil {
+	if err := ensureImages(repoDir); err != nil {
 		return err
 	}
 
@@ -70,11 +79,16 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 
 	cfg.Ignore = append(cfg.Ignore, cli.Ignore...)
 	cfg.Readonly = append(cfg.Readonly, cli.Readonly...)
-	cfg.Hostnames = append(cfg.Hostnames, cli.Hostnames...)
-	cfg.Cidrs = append(cfg.Cidrs, cli.Cidrs...)
 	cfg.Args = append(cfg.Args, cli.Args...)
-	if cli.Resolver != "" {
-		cfg.Resolver = cli.Resolver
+	for _, entry := range cli.Allow {
+		rule, err := ParseAllowEntry(entry)
+		if err != nil {
+			return fmt.Errorf("invalid --allow value %q: %w", entry, err)
+		}
+		cfg.Allow = append(cfg.Allow, rule)
+	}
+	if cli.DNSResolver != "" {
+		cfg.DNSResolver = cli.DNSResolver
 	}
 
 	m, err := scan(workspaceDir, cfg)
@@ -82,7 +96,15 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		return err
 	}
 
-	args, containerName, err := buildArgs(workspaceDir, m, cfg, passthrough)
+	s := newSessionNames()
+
+	cleanup, gatewayIP, err := startSession(s, cfg)
+	defer cleanup()
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+
+	args, err := buildAgentArgs(workspaceDir, m, cfg, passthrough, s, gatewayIP)
 	if err != nil {
 		return err
 	}
@@ -96,13 +118,13 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 	// Resolve trace log path.
 	traceLogFile := traceLog
 	if traceLogFile == "" {
-		traceLogFile = filepath.Join(membraneDir, "trace", containerName+".jsonl.gz")
+		traceLogFile = filepath.Join(membraneDir, "trace", s.agentContainer+".jsonl.gz")
 	}
 	if err := os.MkdirAll(filepath.Dir(traceLogFile), 0o755); err != nil {
 		return fmt.Errorf("create trace dir: %w", err)
 	}
 
-	tracer := NewTracer(containerName, traceLogFile)
+	tracer := NewTracer(s.agentContainer, traceLogFile)
 	if err := tracer.Start(); err != nil {
 		return fmt.Errorf("tracee failed to start: %w\nRe-run with --no-trace to start without tracing", err)
 	}
@@ -126,7 +148,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 	// Retry docker inspect until the container exists (up to ~5s).
 	var cid string
 	for i := 0; i < 10; i++ {
-		out, err := exec.Command("docker", "inspect", "-f", "{{.Id}}", containerName).Output()
+		out, err := exec.Command("docker", "inspect", "-f", "{{.Id}}", s.agentContainer).Output()
 		if err == nil {
 			cid = strings.TrimSpace(string(out))
 			break
@@ -134,7 +156,7 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		time.Sleep(500 * time.Millisecond)
 	}
 	if cid == "" {
-		return fmt.Errorf("could not resolve container ID for %s", containerName)
+		return fmt.Errorf("could not resolve container ID for %s", s.agentContainer)
 	}
 
 	tracer.StartStreaming(cid)
@@ -147,22 +169,29 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 		// Signal received; stop the agent container so execDocker unblocks
 		// and restores the terminal. Tracee cleaned up by deferred tracer.Stop().
 		fmt.Fprintln(os.Stderr, "\r\nmembrane: stopping...")
-		_ = exec.Command("docker", "stop", "-t", "2", containerName).Run()
+		_ = exec.Command("docker", "stop", "-t", "2", s.agentContainer).Run()
 		<-agentErr
 	}
 	return result
 }
 
 func checkAndUpdate(repoDir string) error {
+	// Skip update if not on main (e.g. src is a symlink to a dev working dir).
+	branchOut, err := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil || strings.TrimSpace(string(branchOut)) != "main" {
+		return nil
+	}
+
 	remote, err := remoteCommit()
 	if err != nil {
 		return err
 	}
 
-	local, err := localCommit(repoDir)
+	localOut, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
 	if err != nil {
-		return err
+		return fmt.Errorf("get local commit: %w", err)
 	}
+	local := strings.TrimSpace(string(localOut))
 
 	if remote == local {
 		return nil
@@ -183,5 +212,5 @@ func checkAndUpdate(repoDir string) error {
 		return err
 	}
 
-	return buildImage(repoDir)
+	return buildImages(repoDir)
 }

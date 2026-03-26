@@ -8,20 +8,27 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const (
-	repoURL   = "https://github.com/noperator/membrane.git"
-	apiURL    = "https://api.github.com/repos/noperator/membrane/commits/main"
-	imageName = "membrane"
+	repoURL          = "https://github.com/noperator/membrane.git"
+	apiURL           = "https://api.github.com/repos/noperator/membrane/commits/main"
+	agentImageName   = "membrane-agent"
+	handlerImageName = "membrane-handler"
 )
 
 // Reset removes selected membrane state. components is a string of
 // single-character codes: c=containers, i=image, d=directory.
 // Empty string means all components.
 func Reset(components string) error {
+
+	if runtime.GOOS == "darwin" {
+		os.Setenv("DOCKER_CONTEXT", "colima-membrane")
+	}
+
 	for _, r := range components {
 		if !strings.ContainsRune("cid", r) {
 			return fmt.Errorf("unknown reset component %q (valid: c=containers, i=image, d=directory)", string(r))
@@ -38,7 +45,7 @@ func Reset(components string) error {
 		fmt.Fprintf(os.Stderr, "  c - all running membrane containers\n")
 	}
 	if doI {
-		fmt.Fprintf(os.Stderr, "  i - the membrane Docker image\n")
+		fmt.Fprintf(os.Stderr, "  i - the membrane Docker images\n")
 	}
 	if doD {
 		fmt.Fprintf(os.Stderr, "  d - ~/.membrane\n")
@@ -46,26 +53,29 @@ func Reset(components string) error {
 	fmt.Fprintf(os.Stderr, "\nWorkspace .membrane.yaml files are not affected.\n\nContinue? [y/N] ")
 
 	var response string
-	fmt.Fscan(os.Stdin, &response)
+	_, _ = fmt.Fscan(os.Stdin, &response)
 	if response != "y" && response != "Y" {
 		fmt.Fprintf(os.Stderr, "Aborted.\n")
 		return nil
 	}
 
 	if doC {
-		out, err := exec.Command("docker", "ps", "-q", "--filter", "ancestor="+imageName).Output()
-		if err != nil {
-			return fmt.Errorf("list containers: %w", err)
-		}
-		for _, id := range strings.Fields(string(out)) {
-			if err := exec.Command("docker", "rm", "-f", id).Run(); err != nil {
-				return fmt.Errorf("remove container %s: %w", id, err)
+		for _, img := range []string{agentImageName, handlerImageName} {
+			out, err := exec.Command("docker", "ps", "-q", "--filter", "ancestor="+img).Output()
+			if err != nil {
+				return fmt.Errorf("list containers: %w", err)
+			}
+			for _, id := range strings.Fields(string(out)) {
+				if err := exec.Command("docker", "rm", "-f", id).Run(); err != nil {
+					return fmt.Errorf("remove container %s: %w", id, err)
+				}
 			}
 		}
 	}
 
 	if doI {
-		exec.Command("docker", "rmi", imageName).Run() // ignore error — may not exist
+		_ = exec.Command("docker", "rmi", agentImageName).Run()   // ignore error — may not exist
+		_ = exec.Command("docker", "rmi", handlerImageName).Run() // ignore error — may not exist
 	}
 
 	if doD {
@@ -96,7 +106,6 @@ func membraneHome() (string, error) {
 }
 
 // ensureRepo clones the repo to ~/.membrane/src if not present.
-// Writes the current commit SHA to ~/.membrane/src/.commit after cloning.
 func ensureRepo() (string, error) {
 	home, err := membraneHome()
 	if err != nil {
@@ -118,22 +127,9 @@ func ensureRepo() (string, error) {
 		return "", fmt.Errorf("git clone: %w", err)
 	}
 
-	if err := writeCommit(srcDir); err != nil {
-		return "", err
-	}
-
 	fmt.Fprintf(os.Stderr, "Repo cloned to %s — edit %s to customize.\n",
 		srcDir, filepath.Join(home, "config.yaml"))
 	return srcDir, nil
-}
-
-// localCommit reads the SHA from <repoDir>/.commit.
-func localCommit(repoDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(repoDir, ".commit"))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
 }
 
 // remoteCommit fetches the latest commit SHA on main from the GitHub API.
@@ -163,37 +159,51 @@ func remoteCommit() (string, error) {
 	return result.SHA, nil
 }
 
-// update does a git pull in repoDir and updates .commit.
+// update does a git pull in repoDir.
 func update(repoDir string) error {
 	cmd := exec.Command("git", "-C", repoDir, "pull", "--ff-only")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git pull: %w", err)
-	}
-	return writeCommit(repoDir)
+	return cmd.Run()
 }
 
-// ensureImage checks if the membrane Docker image exists locally.
-// If not, builds it from repoDir.
-func ensureImage(repoDir string) error {
-	out, err := exec.Command("docker", "images", "-q", imageName).Output()
-	if err != nil {
-		return fmt.Errorf("check docker image: %w", err)
+// ensureImages checks if both membrane Docker images exist locally.
+// Builds any that are missing from repoDir.
+func ensureImages(repoDir string) error {
+	for _, img := range []struct{ name, context string }{
+		{agentImageName, "docker/agent"},
+		{handlerImageName, "docker/handler"},
+	} {
+		out, err := exec.Command("docker", "images", "-q", img.name).Output()
+		if err != nil {
+			return fmt.Errorf("check docker image %s: %w", img.name, err)
+		}
+		if strings.TrimSpace(string(out)) != "" {
+			continue
+		}
+		if err := buildImageFromDir(img.name, filepath.Join(repoDir, img.context)); err != nil {
+			return err
+		}
 	}
-	if strings.TrimSpace(string(out)) != "" {
-		return nil // image exists
-	}
-	return buildImage(repoDir)
+	return nil
 }
 
-// buildImage runs docker build -t membrane <repoDir>.
-func buildImage(repoDir string) error {
-	cmd := exec.Command("docker", "build", "-t", imageName, repoDir)
+// buildImages builds both membrane Docker images from repoDir.
+func buildImages(repoDir string) error {
+	if err := buildImageFromDir(agentImageName, filepath.Join(repoDir, "docker/agent")); err != nil {
+		return err
+	}
+	return buildImageFromDir(handlerImageName, filepath.Join(repoDir, "docker/handler"))
+}
+
+// buildImageFromDir runs docker build -t name dir.
+func buildImageFromDir(name, dir string) error {
+	fmt.Fprintf(os.Stderr, "Building %s image...\n", name)
+	cmd := exec.Command("docker", "build", "-t", name, dir)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker build: %w", err)
+		return fmt.Errorf("docker build %s: %w", name, err)
 	}
 	return nil
 }
@@ -211,15 +221,6 @@ func writeDefaultConfig(membraneHomeDir string) error {
 		return fmt.Errorf("read default config: %w", err)
 	}
 	return os.WriteFile(dest, data, 0644)
-}
-
-func writeCommit(repoDir string) error {
-	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return fmt.Errorf("get commit sha: %w", err)
-	}
-	sha := strings.TrimSpace(string(out))
-	return os.WriteFile(filepath.Join(repoDir, ".commit"), []byte(sha+"\n"), 0644)
 }
 
 // isDirty returns true if the git repo at dir has uncommitted changes.

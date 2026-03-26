@@ -23,7 +23,14 @@ func scan(workspaceDir string, cfg *config) (*mounts, error) {
 	// Create temp empty file and dir for shadowing ignored paths.
 	// Not cleaned up: syscall.Exec replaces this process so defers won't
 	// run, and the OS handles /tmp cleanup.
-	tmpDir, err := os.MkdirTemp("", "membrane-")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	tmpBase := filepath.Join(home, ".membrane", "tmp")
+	_ = os.MkdirAll(tmpBase, 0755)
+	tmpDir, err := os.MkdirTemp(tmpBase, "membrane-")
+
 	if err != nil {
 		return nil, err
 	}

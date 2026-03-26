@@ -24,9 +24,9 @@ type Tracer struct {
 	traceFile     string // path to output JSONL file
 	cmd           *exec.Cmd
 	stdout        io.ReadCloser
-	containerID   string           // agent container ID for filtering; set once before streaming starts
-	buffered      <-chan string     // lines read between ready signal and StartStreaming
-	done          chan struct{}     // closed when the streaming goroutine exits
+	containerID   string        // agent container ID for filtering; set once before streaming starts
+	buffered      <-chan string // lines read between ready signal and StartStreaming
+	done          chan struct{} // closed when the streaming goroutine exits
 }
 
 // traceeEvents is the default set of events to trace.
