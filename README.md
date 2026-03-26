@@ -24,6 +24,10 @@ Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you
 
 ## Getting started
 
+### Prerequisites
+
+Membrane has been tested on macOS and Ubuntu Linux. On **macOS**, [Homebrew](https://brew.sh) must be installed for the first-run install script to install Colima and Docker CLI (if needed). On **Linux**, [Docker Engine](https://docs.docker.com/engine/install/ubuntu/) must be installed and running; the first-run install script installs Sysbox on top of an existing Docker installation.
+
 ### Install
 
 ```bash
@@ -35,11 +39,6 @@ On first run, membrane checks that all dependencies are present (or otherwise of
 On **macOS**, membrane runs inside a dedicated [Colima](https://github.com/abiosoft/colima) VM with [Sysbox](https://github.com/nestybox/sysbox) installed. If these aren't present, membrane will offer to run [`scripts/install-macos.sh`](scripts/install-macos.sh) which installs Colima and Docker CLI via Homebrew, creates a dedicated Colima VM, and installs Sysbox inside the VM and registers it as a Docker runtime. The dedicated Colima profile keeps membrane's containers and images isolated from your existing Docker setup.
 
 On **Linux**, membrane uses the system Docker daemon directly. If Sysbox isn't installed, membrane will offer to run [`scripts/install-linux.sh`](scripts/install-linux.sh) which installs and registers it automatically.
-
-```bash
-cd /your/workspace
-membrane
-```
 
 ### Usage
 
@@ -66,6 +65,7 @@ Optionally pass a specific command to be executed, using `--` to separate membra
 
 ```bash
 # Drop into a shell
+cd /your/workspace
 membrane
 
 # Run a specific command
