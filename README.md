@@ -11,6 +11,17 @@
 
 Membrane is a lightweight, agent-agnostic, cross-platform sandbox that gives you real-time visibility into everything that your agent does.
 
+The most important property of a secure sandbox is that you can clearly understand what it's doing. As it gets bigger and more complex, it introduces more potential failure points. Membrane is deliberately minimal. It covers the core features you'd expect from an agent sandbox (namely, network and filesystem isolation) and omits everything else. At the time of this writing, **membrane's codebase is 50X smaller than [OpenShell](https://github.com/NVIDIA/OpenShell)**, or about 2% the size. Simplicity is a feature.
+
+```
+$ find OpenShell/ -name '*.rs' -exec cat {} \; | wc -c
+ 2833412
+$ find membrane/ -name '*.go' -exec cat {} \; | wc -c
+   55689
+$ echo 2833412 / 55689 | bc -l
+50.88
+```
+
 ### Features
 
 - **Network egress filtering**: Allowed hosts, ports, HTTP methods, and HTTP paths are enforced via firewall/proxy.<br><sub>&emsp;*Most tools don't filter the network at all, or require manual iptables rules that are easy to misconfigure.*</sub>
