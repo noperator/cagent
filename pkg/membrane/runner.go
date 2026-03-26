@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -44,14 +43,12 @@ func writeAllowFile(allow []AllowRule) (string, error) {
 }
 
 func hasSysbox() bool {
-	if runtime.GOOS != "linux" {
-		return false
-	}
-	out, err := exec.Command("docker", "info").Output()
+	out, err := exec.Command("docker", "info", "--format",
+		"{{json .Runtimes}}").Output()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), "sysbox-runc")
+	return strings.Contains(string(out), `"sysbox-runc"`)
 }
 
 type sessionNames struct {

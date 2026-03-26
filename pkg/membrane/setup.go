@@ -100,7 +100,6 @@ func membraneHome() (string, error) {
 }
 
 // ensureRepo clones the repo to ~/.membrane/src if not present.
-// Writes the current commit SHA to ~/.membrane/src/.commit after cloning.
 func ensureRepo() (string, error) {
 	home, err := membraneHome()
 	if err != nil {
@@ -122,22 +121,9 @@ func ensureRepo() (string, error) {
 		return "", fmt.Errorf("git clone: %w", err)
 	}
 
-	if err := writeCommit(srcDir); err != nil {
-		return "", err
-	}
-
 	fmt.Fprintf(os.Stderr, "Repo cloned to %s — edit %s to customize.\n",
 		srcDir, filepath.Join(home, "config.yaml"))
 	return srcDir, nil
-}
-
-// localCommit reads the SHA from <repoDir>/.commit.
-func localCommit(repoDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(repoDir, ".commit"))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
 }
 
 // remoteCommit fetches the latest commit SHA on main from the GitHub API.
@@ -167,15 +153,12 @@ func remoteCommit() (string, error) {
 	return result.SHA, nil
 }
 
-// update does a git pull in repoDir and updates .commit.
+// update does a git pull in repoDir.
 func update(repoDir string) error {
 	cmd := exec.Command("git", "-C", repoDir, "pull", "--ff-only")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git pull: %w", err)
-	}
-	return writeCommit(repoDir)
+	return cmd.Run()
 }
 
 // ensureImages checks if both membrane Docker images exist locally.
@@ -232,15 +215,6 @@ func writeDefaultConfig(membraneHomeDir string) error {
 		return fmt.Errorf("read default config: %w", err)
 	}
 	return os.WriteFile(dest, data, 0644)
-}
-
-func writeCommit(repoDir string) error {
-	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return fmt.Errorf("get commit sha: %w", err)
-	}
-	sha := strings.TrimSpace(string(out))
-	return os.WriteFile(filepath.Join(repoDir, ".commit"), []byte(sha+"\n"), 0644)
 }
 
 // isDirty returns true if the git repo at dir has uncommitted changes.

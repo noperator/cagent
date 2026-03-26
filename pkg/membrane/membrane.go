@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -25,8 +26,17 @@ type CLIOverrides struct {
 // Run is the main entry point called from cmd/membrane/main.go.
 // passthrough args are forwarded as the container command.
 func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli CLIOverrides) error {
+
+	if runtime.GOOS == "darwin" {
+		os.Setenv("DOCKER_CONTEXT", "colima-membrane")
+	}
+
 	repoDir, err := ensureRepo()
 	if err != nil {
+		return err
+	}
+
+	if err := ensureDeps(repoDir); err != nil {
 		return err
 	}
 
@@ -166,15 +176,22 @@ func Run(noUpdate bool, trace bool, traceLog string, passthrough []string, cli C
 }
 
 func checkAndUpdate(repoDir string) error {
+	// Skip update if not on main (e.g. src is a symlink to a dev working dir).
+	branchOut, err := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil || strings.TrimSpace(string(branchOut)) != "main" {
+		return nil
+	}
+
 	remote, err := remoteCommit()
 	if err != nil {
 		return err
 	}
 
-	local, err := localCommit(repoDir)
+	localOut, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
 	if err != nil {
-		return err
+		return fmt.Errorf("get local commit: %w", err)
 	}
+	local := strings.TrimSpace(string(localOut))
 
 	if remote == local {
 		return nil

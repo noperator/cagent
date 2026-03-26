@@ -5,6 +5,7 @@
 # Usage: bash install-linux.sh
 
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
 
 # -------------------------------------------------------
 # Helpers
@@ -51,8 +52,8 @@ runtime_registered() {
 # -------------------------------------------------------
 # Sysbox
 # -------------------------------------------------------
-if runtime_registered "sysbox-runc"; then
-    info "Sysbox already registered with Docker — skipping install."
+if [ -x /usr/bin/sysbox-runc ] && runtime_registered "sysbox-runc"; then
+    info "Sysbox already installed and registered — skipping install."
 else
     info "Updating apt cache..."
     sudo apt-get update -qq
@@ -90,24 +91,6 @@ else
     info "Starting Docker..."
     sudo systemctl start docker
     wait_for_docker 30
-
-    if ! runtime_registered "sysbox-runc"; then
-        info "Manually registering sysbox-runc..."
-        SYSBOX_BIN=$(command -v sysbox-runc 2>/dev/null || echo "/usr/bin/sysbox-runc")
-        local daemon_json="/etc/docker/daemon.json"
-        [[ -f "$daemon_json" ]] || echo '{}' | sudo tee "$daemon_json" >/dev/null
-        local tmp
-        tmp=$(mktemp)
-        sudo python3 -c "
-import json
-d = json.load(open('$daemon_json'))
-d.setdefault('runtimes', {})['sysbox-runc'] = {'path': '$SYSBOX_BIN'}
-json.dump(d, open('$tmp', 'w'), indent=2)
-"
-        sudo mv "$tmp" "$daemon_json"
-        sudo systemctl restart docker
-        wait_for_docker 30
-    fi
 
     runtime_registered "sysbox-runc" || error "Sysbox installed but not registered with Docker."
     info "Sysbox installed: $(sysbox-runc --version 2>&1 | head -1)"
