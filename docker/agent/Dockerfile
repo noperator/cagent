@@ -84,7 +84,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN CRUN_VER=$(curl -s https://api.github.com/repos/containers/crun/releases/latest | grep '"tag_name"' | cut -d'"' -f4) && \
-    curl -L -o /usr/bin/crun "https://github.com/containers/crun/releases/download/${CRUN_VER}/crun-${CRUN_VER}-linux-amd64" && \
+    ARCH=$(dpkg --print-architecture) && \
+    curl -L -o /usr/bin/crun "https://github.com/containers/crun/releases/download/${CRUN_VER}/crun-${CRUN_VER}-linux-${ARCH}" && \
     chmod +x /usr/bin/crun
 
 # Add agent to docker group
