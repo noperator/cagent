@@ -92,6 +92,6 @@ func isFlagPassed(name string) bool {
 // stringFlag implements pflag.Value with a custom Type() for help output.
 type stringFlag struct{ val string }
 
-func (f *stringFlag) String() string { return f.val }
+func (f *stringFlag) String() string     { return f.val }
 func (f *stringFlag) Set(v string) error { f.val = v; return nil }
-func (f *stringFlag) Type() string { return "" }
+func (f *stringFlag) Type() string       { return "" }

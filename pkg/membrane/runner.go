@@ -79,10 +79,10 @@ func newSessionNames() sessionNames {
 // IP on the internal network.
 func startSession(s sessionNames, cfg *config) (func(), string, error) {
 	cleanup := func() {
-		exec.Command("docker", "stop", "-t", "2", s.handlerContainer).Run()
-		exec.Command("docker", "network", "rm", s.internalNetwork).Run()
-		exec.Command("docker", "network", "rm", s.externalNetwork).Run()
-		exec.Command("docker", "volume", "rm", s.caVolume).Run()
+		_ = exec.Command("docker", "stop", "-t", "2", s.handlerContainer).Run()
+		_ = exec.Command("docker", "network", "rm", s.internalNetwork).Run()
+		_ = exec.Command("docker", "network", "rm", s.externalNetwork).Run()
+		_ = exec.Command("docker", "volume", "rm", s.caVolume).Run()
 	}
 
 	if out, err := exec.Command("docker", "volume", "create",

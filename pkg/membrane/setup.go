@@ -53,7 +53,7 @@ func Reset(components string) error {
 	fmt.Fprintf(os.Stderr, "\nWorkspace .membrane.yaml files are not affected.\n\nContinue? [y/N] ")
 
 	var response string
-	fmt.Fscan(os.Stdin, &response)
+	_, _ = fmt.Fscan(os.Stdin, &response)
 	if response != "y" && response != "Y" {
 		fmt.Fprintf(os.Stderr, "Aborted.\n")
 		return nil
@@ -74,8 +74,8 @@ func Reset(components string) error {
 	}
 
 	if doI {
-		exec.Command("docker", "rmi", agentImageName).Run()   // ignore error — may not exist
-		exec.Command("docker", "rmi", handlerImageName).Run() // ignore error — may not exist
+		_ = exec.Command("docker", "rmi", agentImageName).Run()   // ignore error — may not exist
+		_ = exec.Command("docker", "rmi", handlerImageName).Run() // ignore error — may not exist
 	}
 
 	if doD {

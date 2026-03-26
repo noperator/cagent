@@ -28,7 +28,7 @@ func scan(workspaceDir string, cfg *config) (*mounts, error) {
 		return nil, err
 	}
 	tmpBase := filepath.Join(home, ".membrane", "tmp")
-	os.MkdirAll(tmpBase, 0755)
+	_ = os.MkdirAll(tmpBase, 0755)
 	tmpDir, err := os.MkdirTemp(tmpBase, "membrane-")
 
 	if err != nil {

@@ -26,7 +26,7 @@ update-ca-certificates >/dev/null 2>&1
 if [ "$MEMBRANE_DIND" = "1" ] && command -v dockerd >/dev/null 2>&1; then
     dockerd --add-runtime=crun=/usr/bin/crun --default-runtime=crun \
         >/var/log/dockerd.log 2>&1 &
-    for i in $(seq 1 30); do
+    for _ in $(seq 1 30); do
         [ -S /var/run/docker.sock ] && break
         sleep 1
     done
@@ -44,5 +44,6 @@ if [ -n "$MEMBRANE_TITLE" ]; then
 fi
 
 cd /workspace
+# shellcheck disable=SC2016
 exec capsh --drop=cap_net_admin,cap_net_raw,cap_setpcap,cap_setfcap \
     -- -c 'exec gosu agent "${@:-bash}"' -- "$@"

@@ -103,12 +103,12 @@ info "Running smoke tests..."
 
 # Test 1: basic startup
 info "Test 1: basic startup..."
-KERNEL=$(docker run --rm --runtime=sysbox-runc alpine uname -r 2>&1) &&
-    info "  kernel: $KERNEL — OK" ||
-    {
-        warn "  basic startup FAILED"
-        exit 1
-    }
+if KERNEL=$(docker run --rm --runtime=sysbox-runc alpine uname -r 2>&1); then
+    info "  kernel: $KERNEL — OK"
+else
+    warn "  basic startup FAILED"
+    exit 1
+fi
 
 # Test 2: user namespace isolation — check uid_map directly.
 # Sysbox maps container UID 0 → host UID 100000+ via user namespaces.
@@ -126,7 +126,7 @@ fi
 
 # Test 3: nftables egress filtering (membrane relies on this)
 info "Test 3: nftables egress filtering..."
-docker run --rm --runtime=sysbox-runc --cap-add NET_ADMIN alpine sh -c '
+if docker run --rm --runtime=sysbox-runc --cap-add NET_ADMIN alpine sh -c '
     if ! ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then
         echo "SKIP: 1.1.1.1 not reachable (no internet?)"
         exit 0
@@ -146,7 +146,11 @@ docker run --rm --runtime=sysbox-runc --cap-add NET_ADMIN alpine sh -c '
         echo "FAIL: ping failed after removing rule"
         exit 1
     fi
-' && info "  nftables: OK" || warn "  nftables: FAILED"
+'; then
+    info "  nftables: OK"
+else
+    warn "  nftables: FAILED"
+fi
 
 echo ""
 info "Done. Sysbox is ready."

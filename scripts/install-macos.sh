@@ -40,7 +40,11 @@ command -v brew &>/dev/null || error "Homebrew not found. Install from https://b
 
 info "Ensuring colima and docker CLI are installed..."
 for pkg in colima docker; do
-    brew list "$pkg" &>/dev/null && info "  $pkg already installed" || brew install "$pkg"
+    if brew list "$pkg" &>/dev/null; then
+        info "  $pkg already installed"
+    else
+        brew install "$pkg"
+    fi
 done
 
 # -------------------------------------------------------
@@ -113,9 +117,11 @@ colima ssh --profile "$COLIMA_PROFILE" -- bash -s <"$LINUX_SCRIPT"
 # -------------------------------------------------------
 echo ""
 info "Verifying sysbox from host..."
-DOCKER_CONTEXT="$DOCKER_CONTEXT_NAME" docker run --rm --runtime=sysbox-runc alpine echo "sysbox ok" &&
-    info "Sysbox verified — ready to use." ||
+if DOCKER_CONTEXT="$DOCKER_CONTEXT_NAME" docker run --rm --runtime=sysbox-runc alpine echo "sysbox ok"; then
+    info "Sysbox verified — ready to use."
+else
     error "Sysbox runtime not working from host. Try: colima restart --profile $COLIMA_PROFILE"
+fi
 
 echo ""
 info "Done. Run 'membrane' from any workspace to start."

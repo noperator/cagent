@@ -144,7 +144,7 @@ func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstr
 				if ports == nil {
 					// any port: add to allowed-any-port
 					if err := exec.Command("nft", "add", "element", "ip", "membrane",
-						"allowed-any-port", "{", ip.String() + "/32", "}").Run(); err != nil {
+						"allowed-any-port", "{", ip.String()+"/32", "}").Run(); err != nil {
 						log.Printf("dns-proxy: nft add %s to allowed-any-port: %v", ip, err)
 					}
 				} else {

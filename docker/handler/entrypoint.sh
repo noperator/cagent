@@ -1,21 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Count non-loopback interfaces using a glob (avoids ls|grep)
+nonlo_count() {
+    local n=0
+    for _f in /sys/class/net/*; do
+        [ "${_f##*/}" != "lo" ] && n=$((n + 1))
+    done
+    echo "$n"
+}
+
 # Wait for both interfaces
 for i in $(seq 1 15); do
-    [ "$(ls /sys/class/net/ | grep -v lo | wc -l)" -ge 2 ] && break
+    [ "$(nonlo_count)" -ge 2 ] && break
     sleep 1
 done
-[ "$(ls /sys/class/net/ | grep -v lo | wc -l)" -ge 2 ] \
-    || { echo "ERROR: timed out waiting for second network interface"; exit 1; }
+[ "$(nonlo_count)" -ge 2 ] ||
+    {
+        echo "ERROR: timed out waiting for second network interface"
+        exit 1
+    }
 
 # Identify internal vs external interface
 DEFAULT_GW_IF=$(ip route | grep '^default' | awk '{print $5}' | head -1)
 INTERNAL_IF=""
-for iface in $(ls /sys/class/net/ | grep -v lo); do
+for _f in /sys/class/net/*; do
+    iface="${_f##*/}"
+    [ "$iface" = "lo" ] && continue
     [ "$iface" != "$DEFAULT_GW_IF" ] && INTERNAL_IF="$iface"
 done
-[ -n "$INTERNAL_IF" ] || { echo "ERROR: could not identify internal interface"; exit 1; }
+[ -n "$INTERNAL_IF" ] || {
+    echo "ERROR: could not identify internal interface"
+    exit 1
+}
 echo "Interfaces: external=$DEFAULT_GW_IF internal=$INTERNAL_IF"
 
 # Enable IP forwarding
@@ -102,7 +119,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
 
 # Place CA into mitmproxy confdir
 mkdir -p /tmp/mitmproxy
-cat /tmp/ca.key /membrane-ca/ca.crt > /tmp/mitmproxy/mitmproxy-ca.pem
+cat /tmp/ca.key /membrane-ca/ca.crt >/tmp/mitmproxy/mitmproxy-ca.pem
 echo "CA cert generated."
 
 # Start mitmproxy in transparent mode
@@ -116,7 +133,7 @@ mitmdump \
 
 # Wait for mitmproxy to bind its port (timeout 15s)
 for i in $(seq 1 15); do
-    (echo > /dev/tcp/localhost/$MITMPROXY_PORT) 2>/dev/null && break
+    (echo >/dev/tcp/localhost/$MITMPROXY_PORT) 2>/dev/null && break
     if [ "$i" -eq 15 ]; then
         echo "ERROR: mitmproxy did not bind within 15s"
         exit 1
