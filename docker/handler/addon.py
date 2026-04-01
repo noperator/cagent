@@ -3,12 +3,14 @@
 Reads allow rules from /etc/membrane/allow.json (or MEMBRANE_ALLOW_FILE
 env var) at startup and enforces http rules on intercepted requests.
 
-Only URL entries with an explicit http array are enforced. Everything
-else passes through.
+All requests fail closed: unknown hostname → 403, unknown IP (when no
+hostname) → 403, URL rule mismatch → 403.
 """
 
 import json
 import os
+import socket
+import struct
 
 from mitmproxy import http as mhttp
 
@@ -18,24 +20,36 @@ def _load_rules():
     with open(allow_file) as f:
         rules = json.load(f)
 
-    # Build map of host → list of (url_path, http_rules)
-    # Only URL entries with http rules are enforced.
-    enforced = {}
+    allowed_hosts = set()
+    allowed_cidrs = []
+    url_rules = {}
+
     for rule in rules:
-        if rule.get("type") != "url":
+        if rule.get("type") == "cidr":
+            cidr = rule.get("cidr", "")
+            if "/" not in cidr:
+                cidr = cidr + "/32"
+            addr, prefix_len = cidr.split("/", 1)
+            allowed_cidrs.append((addr, int(prefix_len)))
             continue
-        http_rules = rule.get("http")
-        if not http_rules:
-            continue
+
         host = rule.get("host", "").lower()
-        url_path = rule.get("path", "") or "/"
-        if host not in enforced:
-            enforced[host] = []
-        enforced[host].append((url_path, http_rules))
-    return enforced
+        if not host:
+            continue
+
+        allowed_hosts.add(host)
+
+        if rule.get("path") or rule.get("http"):
+            url_path = rule.get("path", "") or "/"
+            http_rules = rule.get("http") or []
+            if host not in url_rules:
+                url_rules[host] = []
+            url_rules[host].append((url_path, http_rules))
+
+    return allowed_hosts, allowed_cidrs, url_rules
 
 
-ENFORCED = _load_rules()
+ALLOWED_HOSTS, ALLOWED_CIDRS, URL_RULES = _load_rules()
 
 
 def _effective_path(url_path, rule_path):
@@ -59,27 +73,60 @@ def _matches_rule(url_path, rule, method, path):
     paths = rule.get("paths")
     if paths:
         for p in paths:
-            if path.startswith(_effective_path(url_path, p["path"])):
+            effective = _effective_path(url_path, p["path"])
+            if path == effective or path.startswith(effective.rstrip("/") + "/"):
                 return True
         return False
 
     # No path constraint — check url_path as prefix
-    if not path.startswith(url_path):
+    if path != url_path and not path.startswith(url_path.rstrip("/") + "/"):
         return False
 
     return True
 
 
 def request(flow: mhttp.HTTPFlow) -> None:
-    host = flow.request.pretty_host.lower()
+    host = flow.request.pretty_host.lower() if flow.request.pretty_host else ""
 
-    if host not in ENFORCED:
-        return  # no http rules for this host — passthrough
+    if not host:
+        # No hostname — check destination IP against ALLOWED_CIDRS
+        peername = flow.server_conn.peername
+        if not peername:
+            flow.response = mhttp.Response.make(403, b"", {"Content-Type": "text/plain"})
+            return
+        ip = peername[0]
+        try:
+            ip_int = struct.unpack("!I", socket.inet_aton(ip))[0]
+        except OSError:
+            flow.response = mhttp.Response.make(403, b"", {"Content-Type": "text/plain"})
+            return
+        for net_addr, prefix_len in ALLOWED_CIDRS:
+            try:
+                net_int = struct.unpack("!I", socket.inet_aton(net_addr))[0]
+            except OSError:
+                continue
+            mask = (0xFFFFFFFF << (32 - prefix_len)) & 0xFFFFFFFF
+            if (ip_int & mask) == (net_int & mask):
+                return  # matched CIDR — allow
+        flow.response = mhttp.Response.make(403, b"", {"Content-Type": "text/plain"})
+        return
+
+    if host not in ALLOWED_HOSTS:
+        flow.response = mhttp.Response.make(403, b"", {"Content-Type": "text/plain"})
+        return
+
+    if host not in URL_RULES:
+        return  # hostname allowed, no URL-level constraints
 
     method = flow.request.method
     path = flow.request.path
 
-    for url_path, http_rules in ENFORCED[host]:
+    for url_path, http_rules in URL_RULES[host]:
+        if not http_rules:
+            # No http rules — any method/path under url_path is allowed
+            if path == url_path or path.startswith(url_path.rstrip("/") + "/"):
+                return
+            continue
         for rule in http_rules:
             if _matches_rule(url_path, rule, method, path):
                 return  # matched — allow
