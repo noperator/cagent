@@ -127,8 +127,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 # LAYER 8: Sudo configuration (depends on utilities layer for sudo)
 # =============================================================================
 
-RUN echo "${USERNAME} ALL=(root) NOPASSWD: /usr/bin/apt-get --no-scripts *, /usr/bin/apt --no-scripts *" > /etc/sudoers.d/${USERNAME}-packages && \
-    chmod 0440 /etc/sudoers.d/${USERNAME}-*
+RUN echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
+    chmod 0440 /etc/sudoers.d/${USERNAME}
 
 # =============================================================================
 # LAYER 9: Scripts (changes most often - keep at bottom)
