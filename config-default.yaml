@@ -47,30 +47,31 @@ readonly:
 #           - /other/path     # absolute path
 allow:
   # Anthropic
-  - api.anthropic.com
-  - sentry.io
   - statsig.anthropic.com
+  - api.anthropic.com
+  - platform.claude.com
   - statsig.com
+  - sentry.io
 
   # Node.js/npm
   - registry.npmjs.org
   - deb.nodesource.com
 
   # Python packages
-  - pypi.org
   - files.pythonhosted.org
+  - pypi.org
 
   # Go packages
-  - dl.google.com
-  - go.dev
   - golang.org
   - google.golang.org
+  - sum.golang.org
+  - proxy.golang.org
+  - dl.google.com
+  - storage.googleapis.com
   - gopkg.in
   - goproxy.io
+  - go.dev
   - pkg.go.dev
-  - proxy.golang.org
-  - storage.googleapis.com
-  - sum.golang.org
 
   # Rust packages
   - crates.io
@@ -78,20 +79,23 @@ allow:
   - index.crates.io
 
   # Ubuntu/Debian packages
+  - deb.debian.org
   - archive.ubuntu.com
-  - security.ubuntu.com
   - ports.ubuntu.com
+  - security.ubuntu.com
 
   # Ubuntu PPAs (deadsnakes, golang-backports, etc.)
-  - ppa.launchpadcontent.net
   - launchpad.net
+  - api.launchpad.net
+  - ppa.launchpadcontent.net
 
   # GitHub
   - github.com
-  - api.github.com
   - codeload.github.com
-  - raw.githubusercontent.com
+  - api.github.com
   - objects.githubusercontent.com
+  - release-assets.githubusercontent.com
+  - raw.githubusercontent.com
 
   # GitLab
   - gitlab.com
@@ -106,11 +110,11 @@ allow:
   - openrouter.ai
 
   # Docker Hub
-  - registry-1.docker.io
-  - auth.docker.io
-  - production.cloudflare.docker.com
   - docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com
   - hub.docker.com
+  - production.cloudflare.docker.com
+  - registry-1.docker.io
+  - auth.docker.io
 
   # Cloudflare
   - cloudflare-dns.com
@@ -121,10 +125,10 @@ allow:
   # AWS Bedrock - North America
   - bedrock-runtime.us-east-1.amazonaws.com
   - bedrock.us-east-1.amazonaws.com
-  - bedrock-runtime.us-east-2.amazonaws.com
-  - bedrock.us-east-2.amazonaws.com
   - bedrock-runtime.us-west-1.amazonaws.com
   - bedrock.us-west-1.amazonaws.com
+  - bedrock-runtime.us-east-2.amazonaws.com
+  - bedrock.us-east-2.amazonaws.com
   - bedrock-runtime.us-west-2.amazonaws.com
   - bedrock.us-west-2.amazonaws.com
 
