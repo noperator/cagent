@@ -281,50 +281,64 @@ readonly:
   - config/
 
 # `allow` lists what the agent is allowed to reach. Each entry is
-# auto-detected from its value:
-#
-#   hostname:  DNS-resolved, any port; passes through mitmproxy with no
-#              method/path constraints unless http: is specified
-#   IP:        added directly to firewall as /32; passes through mitmproxy
-#              with no constraints unless http: is specified
-#   CIDR:      added directly to firewall; passes through mitmproxy with
-#              no constraints unless http: is specified
-#   URL:       DNS-resolved; method/path constraints enforced via mitmproxy
-#
-# Object form supports additional constraints. For hostnames, `ports`
-# restricts to specific ports. For URLs, `http` enables L7 enforcement:
-# methods and paths are OR'd within a rule, rules are OR'd within `http`.
-# Paths without a leading `/` are relative to the URL's path prefix.
-# If no `http` key is present, all methods and paths are allowed.
+# auto-detected from its value: hostname, IP, CIDR, or URL. Object
+# form supports additional constraints via ports: and http: keys.
 allow:
-  # plain hostname: any port, any method/path allowed; goes through mitmproxy
-  - internal.mycompany.com
+  # 1. Plain hostname: any TCP port, any HTTP method/path.
+  #    UDP is blocked unless explicitly opted in (see example 8).
+  - github.com
 
-  # hostname with port restriction
+  # 2. Hostname with port restriction: TCP port 443 only (bare port
+  #    numbers default to TCP). Other ports blocked at L3.
   - dest: registry.mycompany.com
     ports: [443]
 
-  # IP and CIDR: bypass DNS, added directly to firewall; http: rules supported
-  - 192.168.2.1
-  - 192.168.3.0/24
-
-  # URL: allow all methods/paths under /v1/ (no http key)
-  - https://api.anthropic.com/v1/
-
-  # URL: restrict to specific methods and paths
-  - dest: https://api.anthropic.com/v1/
+  # 3. Hostname with http rules: HTTP/HTTPS only, method/path enforced
+  #    on any TCP port. Non-HTTP TCP (SSH, etc.) is blocked. mitmproxy
+  #    detects HTTP/TLS from protocol bytes, not port number, so this
+  #    works on 8443, 8080, or any other port the agent connects to.
+  - dest: api.anthropic.com
     http:
       - methods: [POST]
         paths:
-          - messages    # relative: /v1/messages
-          - /v1/models  # absolute path
+          - /v1/messages
 
-  # URL: multiple rules (OR semantics)
-  - dest: https://api.example.com/posts/
+  # 4. Hostname with http rules AND explicit TCP port. The two entries
+  #    are independent. HTTP is enforced on all TCP ports; port 22
+  #    also allowed. Other non-HTTP TCP ports are blocked.
+  - dest: github.com
     http:
-      - methods: [GET]   # GET anything under /posts/
-      - methods: [POST]  # POST only to /posts/new
-        paths: [new]
+      - methods: [GET, POST]
+        paths: [/api/]
+  - dest: github.com   # second entry adds port 22
+    ports: [22/tcp]
+
+  # 5. URL entry: shorthand for hostname + port from scheme + path
+  #    prefix. All methods allowed under /v1/.
+  - https://api.openai.com/v1/
+
+  # 6. URL entry with http rules: the most specific form. Port from
+  #    scheme enforced at L3, method and path enforced at L7.
+  - dest: https://api.example.com/v1/
+    http:
+      - methods: [POST]
+        paths:
+          - messages    # relative: resolves to /v1/messages
+          - /v1/models  # absolute path also works
+
+  # 7. IP and CIDR: bypass DNS, added directly to firewall. Without
+  #    http, any TCP is allowed. With http, same L7 enforcement as
+  #    hostname entries: non-HTTP TCP blocked, UDP always blocked.
+  - 192.168.2.1
+  - dest: 192.168.3.0/24
+    http:
+      - methods: [GET]
+        paths: [/api/]
+
+  # 8. UDP opt-in: bare port numbers default to TCP. Append /udp to
+  #    explicitly allow UDP on a specific port.
+  - dest: 8.8.8.8
+    ports: [53/udp]
 
 # `args` lists raw arguments appended to the `docker run` command.
 # Environment variables are expanded ($VAR, ${VAR}). Each flag and

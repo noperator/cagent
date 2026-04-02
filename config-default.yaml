@@ -28,36 +28,8 @@ readonly:
   - .membrane.yaml
 
 # `allow` lists what the agent is allowed to reach. Each entry is
-# auto-detected from its value:
-#
-#   hostname:  DNS-resolved, any port; passes through mitmproxy with no
-#              method/path constraints unless http: is specified
-#   IP:        added directly to firewall as /32; passes through mitmproxy
-#              with no constraints unless http: is specified
-#   CIDR:      added directly to firewall; passes through mitmproxy with
-#              no constraints unless http: is specified
-#   URL:       DNS-resolved; method/path constraints enforced via mitmproxy
-#
-# Object form supports additional constraints. For hostnames, `ports`
-# restricts to specific ports. For URLs, `http` enables L7 enforcement:
-# methods and paths are OR'd within a rule, rules are OR'd within `http`.
-# Paths without a leading `/` are relative to the URL's path prefix.
-# If no `http` key is present, all methods and paths are allowed.
-# For example:
-#
-#   - dest: noperator.dev
-#     ports: [80, 443]
-#   - dest: https://api.example.com
-#     http:
-#       - methods: [POST]
-#         paths:
-#           - messages        # relative to URL path: /v1/messages
-#           - /other/path     # absolute path
-#   - dest: 192.168.1.1
-#     http:
-#       - methods: [GET]
-#         paths:
-#           - /api/
+# auto-detected from its value: hostname, IP, CIDR, or URL. Object
+# form supports additional constraints via ports: and http: keys.
 allow:
   # Anthropic
   - statsig.anthropic.com
