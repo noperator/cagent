@@ -15,6 +15,18 @@ import struct
 import urllib.parse
 
 from mitmproxy import http as mhttp
+from mitmproxy.net.tls import starts_like_tls_record
+from mitmproxy.proxy import commands, events
+from mitmproxy.proxy import layer as proxy_layer
+from mitmproxy.proxy.utils import expect
+
+
+class RejectLayer(proxy_layer.Layer):
+    """Immediately closes a connection without forwarding any data."""
+    def _handle_event(self, event: events.Event):
+        if isinstance(event, events.Start):
+            yield commands.CloseConnection(self.context.client)
+        # ignore all subsequent events — connection is already closed
 
 
 def _load_rules():
@@ -25,6 +37,7 @@ def _load_rules():
     allowed_hosts = set()
     allowed_cidrs = []
     url_rules = {}
+    tcp_allowed = {}  # hostname → list of allowed ports ([] means any port)
 
     for rule in rules:
         if rule.get("type") == "cidr":
@@ -49,10 +62,96 @@ def _load_rules():
                 url_rules[host] = []
             url_rules[host].append((url_path, http_rules))
 
-    return allowed_hosts, allowed_cidrs, url_rules
+        if not rule.get("http") and host:
+            ports = rule.get("ports") or []
+            if host not in tcp_allowed:
+                tcp_allowed[host] = []
+            if not ports:
+                tcp_allowed[host] = None  # None means any port allowed
+            elif tcp_allowed[host] is not None:
+                for pr in ports:
+                    tcp_allowed[host].append(pr)
+
+    # Remove hosts from tcp_allowed that also have http rules
+    for host in list(tcp_allowed.keys()):
+        if host not in url_rules:
+            continue
+        # Host has http rules — rebuild tcp_allowed from explicit port
+        # entries only (ignore plain no-port entries for this host)
+        explicit_ports = []
+        for rule in rules:
+            if rule.get("host", "").lower() != host:
+                continue
+            if rule.get("http"):
+                continue
+            for pr in rule.get("ports") or []:
+                explicit_ports.append(pr)
+        if explicit_ports:
+            tcp_allowed[host] = explicit_ports
+        else:
+            del tcp_allowed[host]
+
+    return allowed_hosts, allowed_cidrs, url_rules, tcp_allowed
 
 
-ALLOWED_HOSTS, ALLOWED_CIDRS, URL_RULES = _load_rules()
+ALLOWED_HOSTS, ALLOWED_CIDRS, URL_RULES, TCP_ALLOWED = _load_rules()
+
+
+def _reverse_lookup(ip: str) -> str:
+    """Look up hostname for an IP from the dns-proxy reverse map.
+    Returns empty string if not found."""
+    try:
+        with open("/tmp/membrane-dns-map.json") as f:
+            m = json.load(f)
+        return m.get(ip, "")
+    except Exception:
+        return ""
+
+
+def next_layer(nextlayer: proxy_layer.NextLayer) -> None:
+    """Block non-HTTP/TLS connections to hosts with http-only rules."""
+    if nextlayer.layer is not None:
+        return  # another addon already decided
+
+    host = (nextlayer.context.server.sni or "").lower()
+    addr = nextlayer.context.server.address
+
+    # No SNI — try reverse lookup from dns-proxy map
+    if not host and addr:
+        host = _reverse_lookup(addr[0])
+
+    # If host has no http-only rules, allow through normally
+    if not host:
+        return
+    if host not in ALLOWED_HOSTS:
+        return
+    if host not in URL_RULES:
+        return
+    if host in TCP_ALLOWED:
+        # Has explicit TCP_ALLOWED entry — check port
+        port = addr[1] if addr else 0
+        allowed_ports = TCP_ALLOWED[host]
+        if allowed_ports is None:
+            return  # any port allowed
+        for pr in allowed_ports:
+            if pr["port"] == port:
+                return  # this port explicitly allowed
+        # Port not in TCP_ALLOWED — block
+        nextlayer.layer = RejectLayer(nextlayer.context)
+        return
+
+    # Host has http-only rules and no TCP_ALLOWED entry
+    # Check if data looks like TLS or HTTP — if so, allow through
+    data = nextlayer.data_client()
+
+    if starts_like_tls_record(data):
+        return  # TLS — mitmproxy will decrypt, http rules apply
+
+    if data and data[:8].split(b" ")[0].isalpha() and b" " in data[:16]:
+        return  # plain HTTP verb
+
+    # Empty data or non-HTTP/TLS — block immediately
+    nextlayer.layer = RejectLayer(nextlayer.context)
 
 
 def _effective_path(url_path, rule_path):

@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const reverseMapFile = "/tmp/membrane-dns-map.json"
+
 type portRule struct {
 	Port  int    `json:"port"`
 	Proto string `json:"proto"` // "tcp" or "udp"
@@ -51,6 +53,24 @@ func buildAllowedHosts(allowJSON string) map[string][]portRule {
 		}
 	}
 	return allowed
+}
+
+func updateReverseMap(ip, hostname string) {
+	existing := map[string]string{}
+	if data, err := os.ReadFile(reverseMapFile); err == nil {
+		json.Unmarshal(data, &existing)
+	}
+	existing[ip] = hostname
+
+	tmp := reverseMapFile + ".tmp"
+	data, err := json.Marshal(existing)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return
+	}
+	os.Rename(tmp, reverseMapFile)
 }
 
 func appendUniquePorts(s []portRule, vals ...portRule) []portRule {
@@ -193,6 +213,7 @@ func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstr
 						"allowed-any-port", "{", ip.String()+"/32", "}").Run(); err != nil {
 						log.Printf("dns-proxy: nft add %s to allowed-any-port: %v", ip, err)
 					}
+					updateReverseMap(ip.String(), name)
 				} else {
 					// port-constrained: add ip . proto . port triples
 					for _, pr := range ports {
@@ -202,6 +223,7 @@ func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstr
 							log.Printf("dns-proxy: nft add %s to allowed: %v", elem, err)
 						}
 					}
+					updateReverseMap(ip.String(), name)
 				}
 			}
 			log.Printf("dns-proxy: %s → %v (ports=%v)", name, ips, ports)
