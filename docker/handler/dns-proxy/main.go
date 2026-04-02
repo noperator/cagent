@@ -120,6 +120,22 @@ func extractQueryName(pkt []byte) string {
 }
 
 func handleQuery(query []byte, clientAddr *net.UDPAddr, conn *net.UDPConn, upstream string, allowed map[string][]int) {
+	// Reject packets with more than one question — we only validate the
+	// first question name, so additional questions are an exfiltration
+	// channel. Standard DNS always uses QDCOUNT=1.
+	if len(query) >= 6 && binary.BigEndian.Uint16(query[4:6]) != 1 {
+		resp := make([]byte, len(query))
+		copy(resp, query)
+		resp[2] = (query[2] & 0x01) | 0x80
+		resp[3] = 0x83
+		resp[6], resp[7] = 0, 0
+		resp[8], resp[9] = 0, 0
+		resp[10], resp[11] = 0, 0
+		conn.WriteToUDP(resp, clientAddr)
+		log.Printf("dns-proxy: blocked multi-question packet from %s", clientAddr)
+		return
+	}
+
 	name := extractQueryName(query)
 	if _, ok := allowed[name]; !ok {
 		resp := make([]byte, len(query))
