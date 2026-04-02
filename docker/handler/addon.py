@@ -9,8 +9,10 @@ hostname) → 403, URL rule mismatch → 403.
 
 import json
 import os
+import posixpath
 import socket
 import struct
+import urllib.parse
 
 from mitmproxy import http as mhttp
 
@@ -86,6 +88,23 @@ def _matches_rule(url_path, rule, method, path):
     return True
 
 
+def normalize_path(path):
+    """Normalize a request path by iteratively percent-decoding and
+    resolving dot-segments until the result stabilizes. Preserves a
+    trailing slash if the original path had one.
+    """
+    trailing_slash = path.endswith("/")
+    prev = None
+    while prev != path:
+        prev = path
+        path = urllib.parse.unquote(path)
+        path = posixpath.normpath(path)
+    # posixpath.normpath strips trailing slash; restore if original had one
+    if trailing_slash and not path.endswith("/"):
+        path += "/"
+    return path
+
+
 def _match_cidr(ip_int, method, path):
     """Check ip_int against ALLOWED_CIDRS with optional http rule
     enforcement. Returns 'allow', 'block', or None (no match).
@@ -108,6 +127,7 @@ def _match_cidr(ip_int, method, path):
 
 def request(flow: mhttp.HTTPFlow) -> None:
     host = flow.request.pretty_host.lower() if flow.request.pretty_host else ""
+    path = normalize_path(flow.request.path)
 
     if not host:
         # No hostname — check destination IP against ALLOWED_CIDRS
@@ -121,7 +141,7 @@ def request(flow: mhttp.HTTPFlow) -> None:
         except OSError:
             flow.response = mhttp.Response.make(403, b"", {"Content-Type": "text/plain"})
             return
-        result = _match_cidr(ip_int, flow.request.method, flow.request.path)
+        result = _match_cidr(ip_int, flow.request.method, path)
         if result == "allow":
             return
         if result == "block":
@@ -140,7 +160,7 @@ def request(flow: mhttp.HTTPFlow) -> None:
             except OSError:
                 ip_int = None
             if ip_int is not None:
-                result = _match_cidr(ip_int, flow.request.method, flow.request.path)
+                result = _match_cidr(ip_int, flow.request.method, path)
                 if result == "allow":
                     return
                 if result == "block":
@@ -154,7 +174,6 @@ def request(flow: mhttp.HTTPFlow) -> None:
         return  # hostname allowed, no URL-level constraints
 
     method = flow.request.method
-    path = flow.request.path
 
     for url_path, http_rules in URL_RULES[host]:
         if not http_rules:
