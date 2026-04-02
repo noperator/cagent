@@ -100,6 +100,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     dnsutils \
     libcap2-bin \
+    ncat \
     # Git and GitHub
     git \
     gh \
