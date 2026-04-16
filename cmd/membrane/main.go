@@ -25,7 +25,7 @@ func main() {
 	flag.Var(&reset, "reset", "remove membrane state and exit (c=containers, i=image, d=directory)")
 	flag.Lookup("reset").NoOptDefVal = "cid"
 	optionFlags := flag.NewFlagSet("", flag.ContinueOnError)
-	for _, name := range []string{"no-trace", "no-update", "reset", "trace-log"} {
+	for _, name := range []string{"no-trace", "no-update", "reset", "session-id-file", "trace-log"} {
 		optionFlags.AddFlag(flag.Lookup(name))
 	}
 	configFlags := flag.NewFlagSet("", flag.ContinueOnError)
