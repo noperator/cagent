@@ -243,8 +243,6 @@ func startSession(s sessionNames, cfg *config) (func(), string, error) {
 		return cleanup, "", fmt.Errorf("start handler log capture: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "membrane: handler logs -> %s (gzipped on exit)\n", logPath)
-
 	prevCleanup2 := cleanup
 	cleanup = func() {
 		if logCmd.Process != nil {
