@@ -47,7 +47,7 @@ go install github.com/noperator/membrane/cmd/membrane@latest
 
 <details><summary>Initial setup</summary>
 
-On first run, membrane checks that all dependencies are present (or otherwise offers to install them). It then clones the repo to `~/.membrane/src/`, builds the `membrane-agent` and `membrane-handler` Docker images, and writes a default config to `~/.membrane/config.yaml`. Subsequent runs check for updates automatically. Initial install takes about 5 minutes.
+On first run, membrane checks that all dependencies are present (or otherwise offers to install them). It then clones the repo to `~/.membrane/src/`, builds the `membrane-agent` and `membrane-handler` Docker images, and writes a default config to `~/.membrane/config.yaml`. Subsequent runs check for updates automatically. Initial install takes about 2 minutes.
 
 On **macOS**, membrane runs inside a dedicated [Colima](https://github.com/abiosoft/colima) VM with [Sysbox](https://github.com/nestybox/sysbox) installed. If these aren't present, membrane will offer to run [`scripts/install-macos.sh`](scripts/install-macos.sh) which installs Colima and Docker CLI via Homebrew, creates a dedicated Colima VM, and installs Sysbox inside the VM and registers it as a Docker runtime. The dedicated Colima profile keeps membrane's containers and images isolated from your existing Docker setup.
 
@@ -394,6 +394,7 @@ See [`config-default.yaml`](config-default.yaml) for the full default allow list
 - [ ] support trusting specific CA certs
 - [ ] return error messages from proxy
 - [ ] add debug flag
+- [ ] BYO container
 
 <details><summary>Completed</summary>
 

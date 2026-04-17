@@ -1,147 +1,103 @@
-FROM ubuntu:22.04
-
-# Prevent interactive prompts during package installation
+# syntax=docker/dockerfile:1.4
+FROM ubuntu:22.04 AS base
 ENV DEBIAN_FRONTEND=noninteractive
-
-# =============================================================================
-# LAYER 1: Bootstrap packages (rarely changes)
-# =============================================================================
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    wget \
-    gnupg \
-    build-essential \
-    software-properties-common \
+    ca-certificates curl wget \
     && rm -rf /var/lib/apt/lists/*
 
-# =============================================================================
-# LAYER 2: Language runtimes (version-pinned, rarely change)
-# =============================================================================
-
-# Node.js
-ARG NODE_VERSION=20
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-# Python
-ARG PYTHON_VERSION=3.13
-RUN add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && apt-get install -y \
-    python${PYTHON_VERSION} \
-    python${PYTHON_VERSION}-venv \
-    python${PYTHON_VERSION}-dev \
-    python3-pip \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Go
+# ---- Parallel stage: Go ----
+FROM base AS go-stage
 ARG GO_VERSION=1.23.2
 RUN ARCH=$(dpkg --print-architecture) && \
-    wget "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" && \
-    tar -C /usr/local -xzf "go${GO_VERSION}.linux-${ARCH}.tar.gz" && \
-    rm "go${GO_VERSION}.linux-${ARCH}.tar.gz"
+    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" && \
+    tar -C /usr/local -xzf "go${GO_VERSION}.linux-${ARCH}.tar.gz"
+
+# ---- Parallel stage: crun ----
+FROM base AS crun-stage
+RUN CRUN_VER=1.22 && \
+    ARCH=$(dpkg --print-architecture) && \
+    curl -L -o /crun "https://github.com/containers/crun/releases/download/${CRUN_VER}/crun-${CRUN_VER}-linux-${ARCH}" && \
+    chmod +x /crun
+
+# ---- Parallel stage: Node + npm globals ----
+# Node is installed here and a fresh `npm install -g` runs for the agent
+# packages. This stage needs build-essential and python3 so native npm
+# modules compile cleanly.
+FROM base AS node-stage
+ARG NODE_VERSION=20
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install -y --no-install-recommends \
+        nodejs build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g \
+    @anthropic-ai/claude-code@2.1.87 \
+    @openai/codex@0.118.0
+
+# ---- Parallel stage: download .debs only, do not install them ----
+# Runs concurrent with go-stage, crun-stage, node-stage.
+# Package list MUST MATCH the final stage's apt-get install exactly —
+# drift causes silent re-download, not failure, but defeats the optimization.
+FROM base AS apt-cache-stage
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --download-only \
+        build-essential \
+        python3 python3-venv python3-dev python3-pip \
+        docker.io \
+        iproute2 dnsutils libcap2-bin ncat \
+        git gh sudo zsh vim less \
+        jq ripgrep tree unzip zip rsync cmake gosu sqlite3 pipx
+
+# ---- Final stage ----
+FROM base AS final
+
+# Pre-populate both the apt cache AND the package lists from the parallel stage.
+# Using both means the hashes in lists match the .debs in archives, so apt
+# recognizes them as valid and skips the fetch entirely.
+COPY --from=apt-cache-stage /var/cache/apt/archives /var/cache/apt/archives
+COPY --from=apt-cache-stage /var/lib/apt/lists /var/lib/apt/lists
+
+# Package list MUST MATCH apt-cache-stage. No apt-get update — the lists
+# were copied from apt-cache-stage and already match the cached archives.
+RUN apt-get install -y --no-install-recommends \
+        build-essential \
+        python3 python3-venv python3-dev python3-pip \
+        docker.io \
+        iproute2 dnsutils libcap2-bin ncat \
+        git gh sudo zsh vim less \
+        jq ripgrep tree unzip zip rsync cmake gosu sqlite3 pipx \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+# Copy artifacts from parallel stages.
+# Node binary and modules
+COPY --from=node-stage /usr/bin/node /usr/bin/node
+COPY --from=node-stage /usr/lib/node_modules /usr/lib/node_modules
+
+# Recreate CLI symlinks. COPY --from follows symlinks (copying the
+# target file contents), which breaks npm's relative require() paths.
+# The symlinks use relative targets matching what nodesource installs.
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm && \
+    ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx && \
+    ln -s ../lib/node_modules/@anthropic-ai/claude-code/cli.js /usr/bin/claude && \
+    ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/bin/codex
+
+COPY --from=go-stage /usr/local/go /usr/local/go
+COPY --from=crun-stage /crun /usr/bin/crun
+
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-# =============================================================================
-# LAYER 3: User setup (rarely changes)
-# =============================================================================
-
+# User setup
 ARG USERNAME=agent
 RUN useradd -m -s /bin/bash ${USERNAME} && \
-    echo "${USERNAME}:${USERNAME}" | chpasswd
+    echo "${USERNAME}:${USERNAME}" | chpasswd && \
+    usermod -aG docker ${USERNAME} && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
+    chmod 0440 /etc/sudoers.d/${USERNAME}
 
-# =============================================================================
-# LAYER 4: Rust (user-level install, rarely changes)
-# =============================================================================
-
-USER ${USERNAME}
-WORKDIR /home/${USERNAME}
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
-USER root
-
-# Set up Go path for agent user
 ENV GOPATH="/home/${USERNAME}/go"
 ENV PATH="${GOPATH}/bin:${PATH}"
 
-# =============================================================================
-# LAYER 5: Coding agents (changes occasionally)
-# =============================================================================
-
-RUN npm install -g @anthropic-ai/claude-code@2.1.87
-RUN npm install -g @openai/codex@0.118.0
-# RUN npm install -g opencode-ai@latest
-# RUN npm install -g @charmland/crush
-
-# =============================================================================
-# LAYER 6: Docker + crun (for optional Sysbox, rarely changes)
-# =============================================================================
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN CRUN_VER=1.22 && \
-    ARCH=$(dpkg --print-architecture) && \
-    curl -L -o /usr/bin/crun "https://github.com/containers/crun/releases/download/${CRUN_VER}/crun-${CRUN_VER}-linux-${ARCH}" && \
-    chmod +x /usr/bin/crun
-
-# Add agent to docker group
-RUN usermod -aG docker ${USERNAME}
-
-# =============================================================================
-# LAYER 7: Utilities (changes often - add new tools here)
-# =============================================================================
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Network tools
-    iproute2 \
-    dnsutils \
-    libcap2-bin \
-    ncat \
-    # Git and GitHub
-    git \
-    gh \
-    # Shell utilities
-    sudo \
-    zsh \
-    vim \
-    less \
-    # Other utilities
-    jq \
-    ripgrep \
-    tree \
-    unzip \
-    zip \
-    rsync \
-    cmake \
-    gosu \
-    sqlite3 \
-    pipx \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_VERSION=0.11.2 sh
-
-# =============================================================================
-# LAYER 8: Sudo configuration (depends on utilities layer for sudo)
-# =============================================================================
-
-RUN echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
-    chmod 0440 /etc/sudoers.d/${USERNAME}
-
-# =============================================================================
-# LAYER 9: Scripts (changes most often - keep at bottom)
-# =============================================================================
-
 COPY entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# =============================================================================
-# Final setup
-# =============================================================================
 
 WORKDIR /workspace
 ENV SHELL=/bin/bash
