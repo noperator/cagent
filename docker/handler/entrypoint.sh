@@ -128,15 +128,15 @@ table ip membrane {
         iifname "$INTERNAL_IF" ip daddr . meta l4proto . th dport @allowed meta l4proto tcp redirect to :$MITMPROXY_PORT
         iifname "$INTERNAL_IF" ip daddr . meta l4proto . th dport @allowed meta l4proto udp accept
         $(if [ "$ANY_HOST" = "1" ]; then
-            if [ -z "$ANY_HOST_TCP_PORTS" ]; then
-                echo "iifname \"$INTERNAL_IF\" meta l4proto tcp redirect to :$MITMPROXY_PORT"
-            else
-                IFS=',' read -ra _ports <<< "$ANY_HOST_TCP_PORTS"
-                for _p in "${_ports[@]}"; do
-                    echo "iifname \"$INTERNAL_IF\" tcp dport $_p redirect to :$MITMPROXY_PORT"
-                done
-            fi
-        fi)
+    if [ -z "$ANY_HOST_TCP_PORTS" ]; then
+        echo "iifname \"$INTERNAL_IF\" meta l4proto tcp redirect to :$MITMPROXY_PORT"
+    else
+        IFS=',' read -ra _ports <<<"$ANY_HOST_TCP_PORTS"
+        for _p in "${_ports[@]}"; do
+            echo "iifname \"$INTERNAL_IF\" tcp dport $_p redirect to :$MITMPROXY_PORT"
+        done
+    fi
+fi)
     }
 
     chain postrouting {
@@ -156,21 +156,21 @@ table ip membrane {
         iifname "$INTERNAL_IF" ip daddr @allowed-any-port meta l4proto tcp accept
         iifname "$INTERNAL_IF" ip daddr . meta l4proto . th dport @allowed accept
         $(if [ "$ANY_HOST" = "1" ]; then
-            if [ -z "$ANY_HOST_TCP_PORTS" ]; then
-                echo "iifname \"$INTERNAL_IF\" meta l4proto tcp accept"
-            else
-                IFS=',' read -ra _ports <<< "$ANY_HOST_TCP_PORTS"
-                for _p in "${_ports[@]}"; do
-                    echo "iifname \"$INTERNAL_IF\" tcp dport $_p accept"
-                done
-            fi
-            if [ -n "$ANY_HOST_UDP_PORTS" ]; then
-                IFS=',' read -ra _uports <<< "$ANY_HOST_UDP_PORTS"
-                for _u in "${_uports[@]}"; do
-                    echo "iifname \"$INTERNAL_IF\" udp dport $_u accept"
-                done
-            fi
-        fi)
+    if [ -z "$ANY_HOST_TCP_PORTS" ]; then
+        echo "iifname \"$INTERNAL_IF\" meta l4proto tcp accept"
+    else
+        IFS=',' read -ra _ports <<<"$ANY_HOST_TCP_PORTS"
+        for _p in "${_ports[@]}"; do
+            echo "iifname \"$INTERNAL_IF\" tcp dport $_p accept"
+        done
+    fi
+    if [ -n "$ANY_HOST_UDP_PORTS" ]; then
+        IFS=',' read -ra _uports <<<"$ANY_HOST_UDP_PORTS"
+        for _u in "${_uports[@]}"; do
+            echo "iifname \"$INTERNAL_IF\" udp dport $_u accept"
+        done
+    fi
+fi)
         iifname "$INTERNAL_IF" log prefix "[membrane BLOCKED] " limit rate 5/second
         iifname "$INTERNAL_IF" reject with icmp admin-prohibited
     }
