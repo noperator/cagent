@@ -36,7 +36,7 @@ type portRule struct {
 }
 
 // AllowRule represents a single entry in the allow list.
-// Type is one of "cidr", "host", or "url".
+// Type is one of "cidr", "host", "url", "any", or "host-pattern".
 type AllowRule struct {
 	Type   string     `json:"type"`
 	CIDR   string     `json:"cidr,omitempty"`
@@ -67,7 +67,33 @@ func (r *AllowRule) UnmarshalYAML(value *yaml.Node) error {
 	}
 }
 
+// validateHostPattern checks that a wildcard host pattern uses only full-label
+// wildcards (e.g. *.example.com), rejecting mid-label wildcards like foo*bar.com.
+func validateHostPattern(s string) error {
+	labels := strings.Split(s, ".")
+	for _, label := range labels {
+		if strings.Contains(label, "*") && label != "*" {
+			return fmt.Errorf("invalid host pattern %q: wildcards may only appear as full labels (\"*.example.com\"), not within labels", s)
+		}
+	}
+	return nil
+}
+
 func (r *AllowRule) parseAuto(s string) error {
+	// 0a. Bare * → any host
+	if s == "*" {
+		r.Type = "any"
+		return nil
+	}
+	// 0b. Wildcard host pattern
+	if strings.Contains(s, "*") {
+		if err := validateHostPattern(s); err != nil {
+			return err
+		}
+		r.Type = "host-pattern"
+		r.Host = strings.ToLower(s)
+		return nil
+	}
 	// 1. IP address → CIDR /32
 	if net.ParseIP(s) != nil {
 		r.Type = "cidr"
