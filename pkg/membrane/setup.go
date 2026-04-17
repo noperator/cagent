@@ -1,8 +1,11 @@
 package membrane
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -170,41 +173,94 @@ func update(repoDir string) error {
 // ensureImages checks if both membrane Docker images exist locally.
 // Builds any that are missing from repoDir.
 func ensureImages(repoDir string) error {
-	for _, img := range []struct{ name, context string }{
+	candidates := []struct{ name, context string }{
 		{agentImageName, "docker/agent"},
 		{handlerImageName, "docker/handler"},
-	} {
+	}
+	var missing []struct{ name, context string }
+	for _, img := range candidates {
 		out, err := exec.Command("docker", "images", "-q", img.name).Output()
 		if err != nil {
 			return fmt.Errorf("check docker image %s: %w", img.name, err)
 		}
-		if strings.TrimSpace(string(out)) != "" {
-			continue
-		}
-		if err := buildImageFromDir(img.name, filepath.Join(repoDir, img.context)); err != nil {
-			return err
+		if strings.TrimSpace(string(out)) == "" {
+			missing = append(missing, struct{ name, context string }{img.name, filepath.Join(repoDir, img.context)})
 		}
 	}
-	return nil
+	return buildImagesParallel(missing)
 }
 
 // buildImages builds both membrane Docker images from repoDir.
 func buildImages(repoDir string) error {
-	if err := buildImageFromDir(agentImageName, filepath.Join(repoDir, "docker/agent")); err != nil {
-		return err
-	}
-	return buildImageFromDir(handlerImageName, filepath.Join(repoDir, "docker/handler"))
+	return buildImagesParallel([]struct{ name, context string }{
+		{agentImageName, filepath.Join(repoDir, "docker/agent")},
+		{handlerImageName, filepath.Join(repoDir, "docker/handler")},
+	})
 }
 
-// buildImageFromDir runs docker build -t name dir.
+// buildImagesParallel runs docker build concurrently for each (name, context)
+// pair. Output from each build is line-prefixed with [name] so the logs
+// from interleaved builds can be distinguished.
+func buildImagesParallel(builds []struct{ name, context string }) error {
+	if len(builds) == 0 {
+		return nil
+	}
+	errs := make(chan error, len(builds))
+	for _, b := range builds {
+		b := b
+		go func() {
+			errs <- buildImageFromDir(b.name, b.context)
+		}()
+	}
+	var firstErr error
+	for range builds {
+		if err := <-errs; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// buildImageFromDir runs docker build, buffering output. On success it
+// prints a short summary; on failure it dumps the captured output.
 func buildImageFromDir(name, dir string) error {
 	fmt.Fprintf(os.Stderr, "Building %s image...\n", name)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home dir: %w", err)
+	}
+	logDir := filepath.Join(home, ".membrane", "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("create log dir: %w", err)
+	}
+	ts := time.Now().Format("20060102-150405")
+	logPath := filepath.Join(logDir, fmt.Sprintf("build-%s-%s.log.gz", name, ts))
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("create build log: %w", err)
+	}
+	defer logFile.Close()
+
+	gzWriter := gzip.NewWriter(logFile)
+	defer gzWriter.Close()
+
+	var buf bytes.Buffer
 	cmd := exec.Command("docker", "build", "-t", name, dir)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	// BUILDKIT_PROGRESS=plain produces line-oriented output with explicit
+	// durations per step — readable from a file and greppable for later
+	// analysis. The ANSI-redraw default would render as garbage in a log.
+	cmd.Env = append(os.Environ(), "BUILDKIT_PROGRESS=plain")
+	mw := io.MultiWriter(&buf, gzWriter)
+	cmd.Stdout = mw
+	cmd.Stderr = mw
+
+	start := time.Now()
 	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "--- %s build output ---\n%s--- end ---\n", name, buf.String())
 		return fmt.Errorf("docker build %s: %w", name, err)
 	}
+	fmt.Fprintf(os.Stderr, "Built %s in %s\n", name, time.Since(start).Round(time.Second))
 	return nil
 }
 
