@@ -245,7 +245,8 @@ func ParseAllowEntry(raw string) (AllowRule, error) {
 
 // loadConfig loads and merges local (~/.membrane/config.yaml) and workspace
 // (.membrane.yaml) configs. Workspace config lists are appended to local lists.
-func loadConfig(workspaceDir string) (*config, error) {
+// When skipGlobal is true, the global config is skipped entirely.
+func loadConfig(workspaceDir string, skipGlobal bool) (*config, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("get home dir: %w", err)
@@ -254,23 +255,26 @@ func loadConfig(workspaceDir string) (*config, error) {
 	localPath := filepath.Join(home, ".membrane", "config.yaml")
 	workspacePath := filepath.Join(workspaceDir, ".membrane.yaml")
 
-	localCfg, localErr := loadConfigFile(localPath)
-	workspace, workspaceErr := loadConfigFile(workspacePath)
+	base := config{}
 
-	localMissing := os.IsNotExist(localErr)
+	if !skipGlobal {
+		localCfg, localErr := loadConfigFile(localPath)
+		localMissing := os.IsNotExist(localErr)
+		if localErr != nil && !localMissing {
+			return nil, fmt.Errorf("load local config: %w", localErr)
+		}
+		if !localMissing {
+			base = *localCfg
+		}
+	}
+
+	workspace, workspaceErr := loadConfigFile(workspacePath)
 	workspaceMissing := os.IsNotExist(workspaceErr)
 
-	if localErr != nil && !localMissing {
-		return nil, fmt.Errorf("load local config: %w", localErr)
-	}
 	if workspaceErr != nil && !workspaceMissing {
 		return nil, fmt.Errorf("load workspace config: %w", workspaceErr)
 	}
 
-	base := config{}
-	if !localMissing {
-		base = *localCfg
-	}
 	if !workspaceMissing {
 		base.Ignore = append(base.Ignore, workspace.Ignore...)
 		base.Readonly = append(base.Readonly, workspace.Readonly...)
