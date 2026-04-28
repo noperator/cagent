@@ -54,6 +54,26 @@ runtime_registered() {
 # -------------------------------------------------------
 if [ -x /usr/bin/sysbox-runc ] && runtime_registered "sysbox-runc"; then
     info "Sysbox already installed and registered — skipping install."
+elif [ -x /usr/bin/sysbox-runc ]; then
+    info "Sysbox binary present but not registered with Docker — merging /etc/docker/daemon.json..."
+
+    command -v jq &>/dev/null || sudo apt-get install -y -qq jq
+
+    tmp=$(mktemp)
+    if ! (sudo test -f /etc/docker/daemon.json && sudo cat /etc/docker/daemon.json || echo '{}') |
+        jq '.runtimes["sysbox-runc"] = {"path": "/usr/bin/sysbox-runc"}' >"$tmp"; then
+        rm -f "$tmp"
+        error "Failed to merge sysbox-runc runtime into /etc/docker/daemon.json."
+    fi
+
+    sudo mv "$tmp" /etc/docker/daemon.json
+    sudo chmod 644 /etc/docker/daemon.json
+
+    info "Reloading Docker daemon..."
+    sudo systemctl reload docker || error "Failed to reload Docker daemon."
+
+    runtime_registered "sysbox-runc" || error "Sysbox binary present but not registered with Docker after daemon.json merge."
+    info "Sysbox registered: $(sysbox-runc --version 2>&1 | head -1)"
 else
     info "Updating apt cache..."
     sudo apt-get update -qq

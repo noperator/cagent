@@ -90,7 +90,10 @@ ARG USERNAME=agent
 RUN useradd -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME}:${USERNAME}" | chpasswd && \
     usermod -aG docker ${USERNAME} && \
-    echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
+    printf '%s\n%s\n' \
+        "${USERNAME} ALL=(ALL) NOPASSWD: ALL" \
+        'Defaults:'${USERNAME}' env_keep += "NODE_EXTRA_CA_CERTS NODE_USE_SYSTEM_CA REQUESTS_CA_BUNDLE SSL_CERT_FILE CURL_CA_BUNDLE"' \
+        > /etc/sudoers.d/${USERNAME} && \
     chmod 0440 /etc/sudoers.d/${USERNAME}
 
 ENV GOPATH="/home/${USERNAME}/go"
