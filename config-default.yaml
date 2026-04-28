@@ -75,12 +75,13 @@ allow:
   - ppa.launchpadcontent.net
 
   # GitHub
-  - github.com
-  - codeload.github.com
   - api.github.com
+  - api.github.com
+  - codeload.github.com
+  - github.com
   - objects.githubusercontent.com
-  - release-assets.githubusercontent.com
   - raw.githubusercontent.com
+  - release-assets.githubusercontent.com
 
   # GitLab
   - gitlab.com
@@ -89,7 +90,9 @@ allow:
   - bitbucket.org
 
   # OpenAI
+  - ab.chatgpt.com
   - api.openai.com
+  - chatgpt.com
 
   # OpenRouter
   - openrouter.ai
